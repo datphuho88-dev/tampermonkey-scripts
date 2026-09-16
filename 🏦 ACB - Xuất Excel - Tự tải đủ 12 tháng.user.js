@@ -1,367 +1,300 @@
 // ==UserScript==
-// @name         ACB - Tải Excel 12 tháng tự động
+// @name         🏦 ACB | Xuất Excel | Tự tải đủ 12 tháng
 // @namespace    acb-auto-export
-// @version      1.0
-// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ
+// @version      1.1.0
+// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ, có dừng và hot-load bản mới
 // @match        https://*.acb.com.vn/*
 // @grant        none
+// @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js
+// @downloadURL  https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // =========================
-    // CÀI ĐẶT
-    // =========================
-    const DELAY_AFTER_SELECT = 1200;    // Đợi sau khi chọn tháng
-    const DELAY_AFTER_DOWNLOAD = 3500;  // Đợi sau mỗi lần bấm Xuất Excel
+    const SCRIPT_VERSION = '1.1.0';
+    const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
+    const INSTANCE_KEY = '__ACB_AUTO_EXPORT_INSTANCE__';
+    const PANEL_ID = 'acb-auto-export-panel';
+
+    const DELAY_AFTER_SELECT = 900;
+    const DELAY_AFTER_DOWNLOAD = 3000;
 
     let running = false;
+    let stopRequested = false;
+    let initTimer = null;
 
-    // =========================
-    // HÀM TIỆN ÍCH
-    // =========================
+    try { window[INSTANCE_KEY]?.destroy?.(); } catch {}
 
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const normalizeText = str => (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const visible = el => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+    };
+
+    function setStatus(message, type = 'info') {
+        const el = document.querySelector('#acb-auto-status');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = ({
+            info: '#374151',
+            success: '#15803d',
+            warning: '#b45309',
+            error: '#dc2626'
+        })[type] || '#374151';
     }
 
-    function normalizeText(str) {
-        return (str || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase();
+    async function hotReload() {
+        if (running) {
+            setStatus('Hãy dừng tiến trình trước khi LOAD', 'warning');
+            return;
+        }
+        setStatus('Đang tải bản mới từ GitHub...');
+        try {
+            const url = RAW_URL + (RAW_URL.includes('?') ? '&' : '?') + '_=' + Date.now();
+            const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const source = await res.text();
+            const m = source.match(/\/\/\s*@version\s+([^\s]+)/);
+            const remoteVersion = m?.[1] || '?';
+            const runtime = source.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\s*/, '');
+            if (!runtime.trim()) throw new Error('Không đọc được code chạy');
+            setStatus(`Đang chạy v${remoteVersion}...`, 'success');
+            setTimeout(() => {
+                try { new Function(runtime)(); }
+                catch (err) {
+                    console.error(err);
+                    alert('ACB LOAD lỗi: ' + err.message);
+                }
+            }, 30);
+        } catch (err) {
+            console.error(err);
+            setStatus('LOAD thất bại: ' + err.message, 'error');
+        }
     }
 
-    // Tìm select gần chữ Tháng / Năm
     function findSelectByLabel(labelText) {
         const wanted = normalizeText(labelText);
-
-        const allElements = [...document.querySelectorAll('td, div, span, label, p')];
+        const allElements = document.querySelectorAll('td, div, span, label, p');
 
         for (const el of allElements) {
-            const text = normalizeText(el.innerText);
+            const t = normalizeText(el.innerText);
+            if (t !== wanted && !t.startsWith(wanted + ' ') && !t.startsWith(wanted + ':')) continue;
 
-            if (
-                text === wanted ||
-                text.startsWith(wanted + ' ') ||
-                text.startsWith(wanted + ':')
-            ) {
-                // 1. tìm trong chính phần tử
-                let select = el.querySelector('select');
+            const own = el.querySelector('select');
+            if (own && visible(own)) return own;
+
+            let parent = el.parentElement;
+            for (let i = 0; parent && i < 4; i++, parent = parent.parentElement) {
+                const select = [...parent.querySelectorAll('select')].find(visible);
                 if (select) return select;
-
-                // 2. tìm ở phần tử cha
-                let parent = el.parentElement;
-
-                for (let i = 0; parent && i < 4; i++) {
-                    select = parent.querySelector('select');
-                    if (select) return select;
-
-                    // tìm hàng kế bên / ô kế bên
-                    const selects = parent.parentElement
-                        ? parent.parentElement.querySelectorAll('select')
-                        : [];
-
-                    if (selects.length) {
-                        for (const s of selects) {
-                            if (s !== select) {
-                                return s;
-                            }
-                        }
-                    }
-
-                    parent = parent.parentElement;
-                }
             }
         }
-
         return null;
     }
 
     function findMonthSelect() {
-        // Ưu tiên nhận biết theo option 01 -> 12
-        const selects = [...document.querySelectorAll('select')];
-
-        for (const s of selects) {
+        for (const s of document.querySelectorAll('select')) {
+            if (!visible(s)) continue;
             const opts = [...s.options].map(o => o.text.trim());
-
-            const monthCount = [
-                '01', '02', '03', '04',
-                '05', '06', '07', '08',
-                '09', '10', '11', '12'
-            ].filter(x => opts.includes(x)).length;
-
-            if (monthCount >= 10) {
-                return s;
+            let count = 0;
+            for (let m = 1; m <= 12; m++) {
+                if (opts.includes(String(m).padStart(2, '0'))) count++;
             }
+            if (count >= 10) return s;
         }
-
         return findSelectByLabel('Tháng');
     }
 
     function findYearSelect() {
-        const selects = [...document.querySelectorAll('select')];
-
-        for (const s of selects) {
-            const opts = [...s.options].map(o => o.text.trim());
-
-            // Có ít nhất vài giá trị dạng 2023, 2024, 2025...
-            const years = opts.filter(x => /^20\d{2}$/.test(x));
-
-            if (years.length >= 2) {
-                return s;
-            }
+        for (const s of document.querySelectorAll('select')) {
+            if (!visible(s)) continue;
+            const years = [...s.options].filter(o => /^20\d{2}$/.test(o.text.trim()));
+            if (years.length >= 2) return s;
         }
-
         return findSelectByLabel('Năm');
     }
 
-   function findExportButton() {
-    const elements = [
-        ...document.querySelectorAll(
-            'input[type="button"], input[type="submit"], button, a'
-        )
-    ].filter(el => {
-        const text = normalizeText(
-            el.innerText ||
-            el.value ||
-            el.title
-        );
+    function findExportButton() {
+        const candidates = [...document.querySelectorAll('input[type="button"],input[type="submit"],button,a')]
+            .filter(el => {
+                if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+                const t = normalizeText(el.innerText || el.value || el.title);
+                return t.includes('xuất excel') || t.includes('xuat excel');
+            });
 
-        return (
-            text === 'xuất excel' ||
-            text.includes('xuất excel') ||
-            text.includes('xuat excel')
-        );
-    });
+        if (!candidates.length) return null;
+        if (candidates.length === 1) return candidates[0];
 
-    console.log('[ACB AUTO] Số nút Xuất Excel tìm thấy:', elements.length);
-
-    // Có 2 nút giống nhau:
-    // [0] = bên trái
-    // [1] = bên phải (chọn theo tháng/năm)
-    return elements[1] || elements[elements.length - 1] || null;
-}
+        // ACB thường có 2 nút giống nhau; nút lọc theo tháng/năm nằm bên phải.
+        return candidates.sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left)[0];
+    }
 
     function setSelectValue(select, wantedValue) {
         if (!select) return false;
-
         const wanted = String(wantedValue);
-
-        let option = [...select.options].find(o =>
-            o.value === wanted ||
-            o.text.trim() === wanted
+        const padded = /^\d+$/.test(wanted) ? wanted.padStart(2, '0') : wanted;
+        const option = [...select.options].find(o =>
+            o.value === wanted || o.text.trim() === wanted ||
+            o.value === padded || o.text.trim() === padded
         );
-
-        // riêng tháng: 1 có thể là 01
-        if (!option && /^\d+$/.test(wanted)) {
-            const padded = wanted.padStart(2, '0');
-
-            option = [...select.options].find(o =>
-                o.value === padded ||
-                o.text.trim() === padded
-            );
-        }
-
         if (!option) return false;
 
         select.value = option.value;
-
-        select.dispatchEvent(
-            new Event('change', {
-                bubbles: true
-            })
-        );
-
-        select.dispatchEvent(
-            new Event('input', {
-                bubbles: true
-            })
-        );
-
+        select.dispatchEvent(new Event('input', { bubbles: true }));
+        select.dispatchEvent(new Event('change', { bubbles: true }));
         return true;
     }
 
-    // =========================
-    // CHẠY TẢI
-    // =========================
+    async function waitForExportButton(timeout = 8000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const btn = findExportButton();
+            if (btn) return btn;
+            await sleep(150);
+        }
+        return null;
+    }
+
+    function updateButtons() {
+        const start = document.querySelector('#acb-auto-start');
+        const stop = document.querySelector('#acb-auto-stop');
+        if (start) {
+            start.disabled = running;
+            start.style.opacity = running ? '.55' : '1';
+        }
+        if (stop) {
+            stop.disabled = !running;
+            stop.style.opacity = running ? '1' : '.45';
+        }
+    }
+
+    function stopExport() {
+        if (!running) return;
+        stopRequested = true;
+        setStatus('Đang dừng sau bước hiện tại...', 'warning');
+    }
 
     async function startExport() {
-
-        if (running) {
-            alert('Đang chạy rồi.');
-            return;
-        }
+        if (running) return;
 
         const monthSelect = findMonthSelect();
         const yearSelect = findYearSelect();
         const exportButton = findExportButton();
 
-        if (!monthSelect) {
-            alert('Không tìm thấy ô chọn THÁNG.');
-            return;
-        }
+        if (!monthSelect) return alert('Không tìm thấy ô chọn THÁNG.');
+        if (!yearSelect) return alert('Không tìm thấy ô chọn NĂM.');
+        if (!exportButton) return alert('Không tìm thấy nút XUẤT EXCEL.');
 
-        if (!yearSelect) {
-            alert('Không tìm thấy ô chọn NĂM.');
-            return;
-        }
-
-        if (!exportButton) {
-            alert('Không tìm thấy nút XUẤT EXCEL.');
-            return;
-        }
-
-        // Hỏi năm cần tải
-        const currentYear =
-            [...yearSelect.options].find(
-                o => o.value === yearSelect.value
-            )?.text.trim() ||
-            new Date().getFullYear();
-
-        const year = prompt(
-            'Nhập năm cần tải đủ 12 tháng:',
-            currentYear
-        );
-
+        const currentYear = [...yearSelect.options].find(o => o.value === yearSelect.value)?.text.trim() || new Date().getFullYear();
+        const year = prompt('Nhập năm cần tải đủ 12 tháng:', currentYear);
         if (!year) return;
 
-        const yearExists = [...yearSelect.options].some(o =>
-            o.text.trim() === String(year) ||
-            o.value === String(year)
-        );
-
-        if (!yearExists) {
-            alert('Không tìm thấy năm ' + year + ' trong danh sách.');
-            return;
-        }
-
-        if (!confirm(
-            `Sẽ tải Excel từ tháng 01 đến tháng 12 năm ${year}.\n\nTiếp tục?`
-        )) {
-            return;
-        }
+        const yearExists = [...yearSelect.options].some(o => o.text.trim() === String(year) || o.value === String(year));
+        if (!yearExists) return alert('Không tìm thấy năm ' + year + ' trong danh sách.');
+        if (!confirm(`Sẽ tải Excel từ tháng 01 đến tháng 12 năm ${year}.\n\nTiếp tục?`)) return;
 
         running = true;
-        startBtn.innerText = '⏳ Đang tải...';
-        startBtn.style.opacity = '0.7';
+        stopRequested = false;
+        updateButtons();
 
         try {
-
-            // Chọn năm
+            setStatus(`Đang chọn năm ${year}...`);
             setSelectValue(yearSelect, year);
+            await sleep(700);
 
-            await sleep(1000);
-
-            for (let month = 1; month <= 12; month++) {
-
-                if (!running) break;
-
+            let completed = 0;
+            for (let month = 1; month <= 12 && !stopRequested; month++) {
                 const mm = String(month).padStart(2, '0');
+                setStatus(`Đang tải ${mm}/${year} • ${month}/12`);
 
-                startBtn.innerText =
-                    `⏳ ${mm}/${year}`;
-
-                console.log(
-                    '[ACB AUTO] Chọn tháng:',
-                    mm,
-                    'năm:',
-                    year
-                );
-
-                // Chọn tháng
-                const monthOK =
-                    setSelectValue(monthSelect, mm) ||
-                    setSelectValue(monthSelect, month);
-
+                const monthOK = setSelectValue(monthSelect, mm) || setSelectValue(monthSelect, month);
                 if (!monthOK) {
-                    console.warn(
-                        '[ACB AUTO] Không chọn được tháng',
-                        mm
-                    );
-
+                    console.warn('[ACB AUTO] Không chọn được tháng', mm);
                     continue;
                 }
 
-                // Đợi website nhận tháng
                 await sleep(DELAY_AFTER_SELECT);
+                if (stopRequested) break;
 
-                // tìm lại nút vì website có thể render lại HTML
-                const btn =
-                    findExportButton();
-
-                if (!btn) {
-                    throw new Error(
-                        'Mất nút Xuất Excel tại tháng ' + mm
-                    );
-                }
-
-                console.log(
-                    '[ACB AUTO] Xuất Excel tháng',
-                    mm
-                );
+                const btn = await waitForExportButton();
+                if (!btn) throw new Error('Mất nút Xuất Excel tại tháng ' + mm);
 
                 btn.click();
-
-                // Đợi file tải
+                completed++;
                 await sleep(DELAY_AFTER_DOWNLOAD);
             }
 
-            alert(
-                `Đã gửi lệnh tải 12 tháng năm ${year}.`
-            );
-
+            if (stopRequested) {
+                setStatus('Đã dừng', 'warning');
+            } else {
+                setStatus(`Hoàn tất ${completed}/12 tháng năm ${year}`, 'success');
+            }
         } catch (err) {
-
             console.error(err);
-
-            alert(
-                'Có lỗi:\n' +
-                err.message
-            );
-
+            setStatus('Lỗi: ' + err.message, 'error');
+            alert('Có lỗi:\n' + err.message);
         } finally {
-
             running = false;
-
-            startBtn.innerText =
-                '⬇ Tải Excel 12 tháng';
-
-            startBtn.style.opacity = '1';
+            stopRequested = false;
+            updateButtons();
         }
     }
 
-    // =========================
-    // NÚT NỔI
-    // =========================
+    function makeButton(text, id, bg, onClick) {
+        const b = document.createElement('button');
+        b.id = id;
+        b.type = 'button';
+        b.textContent = text;
+        b.style.cssText = `border:0;border-radius:7px;padding:7px 10px;cursor:pointer;background:${bg};color:#fff;font-size:12px;font-weight:700;white-space:nowrap`;
+        b.addEventListener('click', onClick);
+        return b;
+    }
 
-    const startBtn = document.createElement('button');
+    function createPanel() {
+        document.querySelector('#' + PANEL_ID)?.remove();
 
-    startBtn.innerText =
-        '⬇ Tải Excel 12 tháng';
+        const panel = document.createElement('div');
+        panel.id = PANEL_ID;
+        panel.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;width:270px;padding:10px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 5px 18px rgba(0,0,0,.25);font-family:Arial,sans-serif;color:#111827';
 
-    Object.assign(startBtn.style, {
-        position: 'fixed',
-        right: '20px',
-        bottom: '20px',
-        zIndex: '999999',
-        padding: '12px 18px',
-        fontSize: '14px',
-        fontWeight: 'bold',
-        cursor: 'pointer',
-        border: '1px solid #174c91',
-        borderRadius: '6px',
-        background: '#2868b2',
-        color: '#fff',
-        boxShadow: '0 2px 8px rgba(0,0,0,.3)'
-    });
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px';
 
-    startBtn.addEventListener(
-        'click',
-        startExport
-    );
+        const title = document.createElement('div');
+        title.innerHTML = `<b>🏦 ACB Auto Excel</b> <span style="font-size:10px;background:#eef2ff;color:#3730a3;padding:2px 5px;border-radius:8px">v${SCRIPT_VERSION}</span>`;
 
-    document.body.appendChild(startBtn);
+        const load = makeButton('↻ LOAD', 'acb-auto-load', '#0f766e', hotReload);
+        load.title = 'Tải code mới nhất từ GitHub và chạy lại ngay';
+        head.append(title, load);
 
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:6px';
+        const start = makeButton('⬇ Tải đủ 12 tháng', 'acb-auto-start', '#2868b2', startExport);
+        const stop = makeButton('⏹ Dừng', 'acb-auto-stop', '#dc2626', stopExport);
+        actions.append(start, stop);
+
+        const status = document.createElement('div');
+        status.id = 'acb-auto-status';
+        status.textContent = `Sẵn sàng • v${SCRIPT_VERSION}`;
+        status.style.cssText = 'margin-top:8px;padding-top:7px;border-top:1px solid #e5e7eb;font-size:11px;font-weight:600';
+
+        panel.append(head, actions, status);
+        document.body.appendChild(panel);
+        updateButtons();
+    }
+
+    function destroy() {
+        stopRequested = true;
+        running = false;
+        if (initTimer) clearTimeout(initTimer);
+        document.querySelector('#' + PANEL_ID)?.remove();
+    }
+
+    window[INSTANCE_KEY] = { version: SCRIPT_VERSION, destroy, hotReload };
+    initTimer = setTimeout(createPanel, 300);
 })();
