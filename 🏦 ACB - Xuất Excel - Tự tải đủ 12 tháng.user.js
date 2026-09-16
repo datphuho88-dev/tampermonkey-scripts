@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🏦 ACB | Xuất Excel | Tự tải đủ 12 tháng
 // @namespace    acb-auto-export
-// @version      1.2.0
-// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ, có dừng, kiểm tra thành phần và hot-load
+// @version      1.2.1
+// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ, có dừng, kiểm tra thành phần và hot-load chống cache
 // @match        https://*.acb.com.vn/*
 // @grant        none
 // @run-at       document-idle
@@ -13,8 +13,9 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = '1.2.0';
+    const SCRIPT_VERSION = '1.2.1';
     const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
+    const API_URL = 'https://api.github.com/repos/datphuho88-dev/tampermonkey-scripts/contents/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
     const INSTANCE_KEY = '__ACB_AUTO_EXPORT_INSTANCE__';
     const PANEL_ID = 'acb-auto-export-panel';
     const POS_KEY = 'ACB_AUTO_EXPORT_PANEL_POS';
@@ -44,22 +45,34 @@
         el.style.color = ({ info:'#374151', success:'#15803d', warning:'#b45309', error:'#dc2626' })[type] || '#374151';
     }
 
+    async function fetchLatestSource() {
+        const url = API_URL + '?ref=main&_=' + Date.now();
+        const res = await fetch(url, {
+            cache: 'no-store',
+            credentials: 'omit',
+            headers: { 'Accept': 'application/vnd.github+json' }
+        });
+        if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data?.content) throw new Error('GitHub API không trả về nội dung file');
+        const base64 = String(data.content).replace(/\s/g, '');
+        const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+
     async function hotReload() {
         if (running) {
             setStatus('Hãy dừng tiến trình trước khi LOAD', 'warning');
             return;
         }
-        setStatus('Đang tải bản mới từ GitHub...');
+        setStatus('Đang lấy code mới nhất từ GitHub API...');
         try {
-            const url = RAW_URL + (RAW_URL.includes('?') ? '&' : '?') + '_=' + Date.now();
-            const res = await fetch(url, { cache:'no-store', credentials:'omit' });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const source = await res.text();
+            const source = await fetchLatestSource();
             const m = source.match(/\/\/\s*@version\s+([^\s]+)/);
             const remoteVersion = m?.[1] || '?';
             const runtime = source.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\s*/, '');
             if (!runtime.trim()) throw new Error('Không đọc được code chạy');
-            setStatus(`Đang chạy v${remoteVersion}...`, 'success');
+            setStatus(`Đã lấy v${remoteVersion} • đang chạy...`, 'success');
             setTimeout(() => {
                 try { new Function(runtime)(); }
                 catch (err) { console.error(err); alert('ACB LOAD lỗi: ' + err.message); }
@@ -297,7 +310,7 @@
         const title = document.createElement('div');
         title.innerHTML = `<b>🏦 ACB Auto Excel</b> <span style="font-size:10px;background:#eef2ff;color:#3730a3;padding:2px 5px;border-radius:8px">v${SCRIPT_VERSION}</span>`;
         const load = makeButton('↻ LOAD', 'acb-auto-load', '#0f766e', hotReload);
-        load.title = 'Tải code mới nhất từ GitHub và chạy lại ngay';
+        load.title = 'Lấy code mới nhất qua GitHub API và chạy lại ngay';
         head.append(title, load);
 
         const actions = document.createElement('div');
@@ -318,7 +331,7 @@
         status.style.cssText = 'margin-top:8px;padding-top:7px;border-top:1px solid #e5e7eb;font-size:11px;font-weight:600';
 
         const help = document.createElement('div');
-        help.textContent = 'Kéo phần tiêu đề để di chuyển hộp. Kiểm tra thành phần sẽ tô màu Tháng / Năm / Xuất Excel trong 3 giây.';
+        help.textContent = 'Kéo phần tiêu đề để di chuyển hộp. LOAD lấy trực tiếp bản mới qua GitHub API để tránh cache Raw.';
         help.style.cssText = 'margin-top:5px;font-size:10px;color:#6b7280;line-height:1.35';
 
         panel.append(head, actions, tools, status, help);
