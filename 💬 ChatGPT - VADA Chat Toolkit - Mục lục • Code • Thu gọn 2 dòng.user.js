@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         💬 ChatGPT - VADA Chat Toolkit - Mục lục • Code • Thu gọn 2 dòng
 // @namespace    https://chatgpt.com/
-// @version      4.2.1
+// @version      4.2.2
 // @description  ChatGPT Toolkit Manual - cực nhẹ, Navigator, Code, thu gọn 2 dòng, LOAD GitHub
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -9,13 +9,15 @@
 // @downloadURL  https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%92%AC%20ChatGPT%20-%20VADA%20Chat%20Toolkit%20-%20M%E1%BB%A5c%20l%E1%BB%A5c%20%E2%80%A2%20Code%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%202%20d%C3%B2ng.user.js
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    const VERSION = '4.2.1';
+    const VERSION = '4.2.2';
     const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%92%AC%20ChatGPT%20-%20VADA%20Chat%20Toolkit%20-%20M%E1%BB%A5c%20l%E1%BB%A5c%20%E2%80%A2%20Code%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%202%20d%C3%B2ng.user.js';
     const GLOBAL_KEY = '__VADA_CHAT_TOOLKIT__';
 
@@ -58,23 +60,13 @@
         ]
     };
 
-    const IDS = {
-        panel: 'vada-manual-panel',
-        toggle: 'vada-manual-toggle',
-        css: 'vada-manual-css',
-        toast: 'vada-manual-toast'
-    };
-
-    let currentView = 'questions';
-    let questionCache = [];
-    let codeCache = [];
-    let compactChat = false;
-    let toastTimer = null;
+    const IDS = { panel:'vada-manual-panel', toggle:'vada-manual-toggle', css:'vada-manual-css', toast:'vada-manual-toast' };
+    let currentView='questions', questionCache=[], codeCache=[], compactChat=false, toastTimer=null;
 
     function injectCSS() {
-        const style = document.createElement('style');
-        style.id = IDS.css;
-        style.textContent = `
+        const style=document.createElement('style');
+        style.id=IDS.css;
+        style.textContent=`
 #${IDS.toggle}{position:fixed;right:14px;top:75px;width:44px;height:44px;border:1px solid #333;border-radius:50%;background:#000;color:#fff;font-weight:700;font-size:15px;z-index:2147483646;cursor:pointer;box-shadow:0 5px 18px rgba(0,0,0,.45)}
 #${IDS.toggle}:hover{transform:scale(1.05)}
 #${IDS.panel}{position:fixed;top:70px;right:14px;width:${CONFIG.panelWidth}px;max-height:calc(100vh - 90px);display:none;flex-direction:column;background:#000;color:#fff;border:1px solid #333;border-radius:14px;box-shadow:0 15px 45px rgba(0,0,0,.65);z-index:2147483647;font-family:Arial,sans-serif;font-size:13px;overflow:hidden}
@@ -87,17 +79,9 @@
         document.head.appendChild(style);
     }
 
-    function createUI() {
-        const toggle = document.createElement('button');
-        toggle.id = IDS.toggle;
-        toggle.textContent = 'V';
-        toggle.title = 'VADA Chat Toolkit';
-        on(toggle, 'click', openPanel);
-        document.body.appendChild(toggle);
-
-        const panel = document.createElement('div');
-        panel.id = IDS.panel;
-        panel.innerHTML = `
+    function createUI(){
+        const toggle=document.createElement('button'); toggle.id=IDS.toggle; toggle.textContent='V'; toggle.title='VADA Chat Toolkit'; on(toggle,'click',openPanel); document.body.appendChild(toggle);
+        const panel=document.createElement('div'); panel.id=IDS.panel; panel.innerHTML=`
 <div class="vada-header"><div><span class="vada-title">⚡ VADA Chat Tools</span><span class="vada-version">v${VERSION}</span></div><button class="vada-close">✕</button></div>
 <div class="vada-body">
 <input id="vada-search" class="vada-search" placeholder="🔎 Tìm...">
@@ -113,435 +97,100 @@
 <div class="vada-section">PROMPT NHANH</div>
 <div id="vada-prompts" class="vada-prompts"></div>
 <div class="vada-grid-4"><button id="vada-top" class="vada-btn">↑ Đầu</button><button id="vada-bottom" class="vada-btn">↓ Cuối</button><button id="vada-load" class="vada-btn vada-btn-load">↻ LOAD</button><button id="vada-close-bottom" class="vada-btn">✕ Ẩn</button></div>
-</div>`;
-        document.body.appendChild(panel);
-        bindPanelEvents();
-        renderPrompts();
-        makeDraggable(panel);
-        restorePosition(panel);
+</div>`; document.body.appendChild(panel); bindPanelEvents(); renderPrompts(); makeDraggable(panel); restorePosition(panel);
     }
 
-    function openPanel() {
-        const panel = document.getElementById(IDS.panel);
-        const toggle = document.getElementById(IDS.toggle);
-        if (panel) panel.style.display = 'flex';
-        if (toggle) toggle.style.display = 'none';
-    }
-    function closePanel() {
-        const panel = document.getElementById(IDS.panel);
-        const toggle = document.getElementById(IDS.toggle);
-        if (panel) panel.style.display = 'none';
-        if (toggle) toggle.style.display = 'block';
-    }
-    function togglePanel() {
-        const panel = document.getElementById(IDS.panel);
-        if (!panel) return;
-        if (panel.style.display === 'none' || getComputedStyle(panel).display === 'none') openPanel(); else closePanel();
-    }
+    function openPanel(){const p=document.getElementById(IDS.panel),t=document.getElementById(IDS.toggle);if(p)p.style.display='flex';if(t)t.style.display='none';}
+    function closePanel(){const p=document.getElementById(IDS.panel),t=document.getElementById(IDS.toggle);if(p)p.style.display='none';if(t)t.style.display='block';}
+    function togglePanel(){const p=document.getElementById(IDS.panel);if(!p)return;(p.style.display==='none'||getComputedStyle(p).display==='none')?openPanel():closePanel();}
 
-    function getMessages() {
-        const nodes = document.querySelectorAll('[data-message-author-role]');
-        const output = [];
-        const seen = new Set();
-        nodes.forEach(node => {
-            const role = node.getAttribute('data-message-author-role');
-            if (role !== 'user' && role !== 'assistant') return;
-            const container = node.closest('[data-testid^="conversation-turn-"]') || node.closest('article') || node;
-            if (seen.has(container)) return;
-            seen.add(container);
-            output.push({ role, el: node, container });
-        });
-        return output;
-    }
+    function getMessages(){const nodes=document.querySelectorAll('[data-message-author-role]'),out=[],seen=new Set();nodes.forEach(node=>{const role=node.getAttribute('data-message-author-role');if(role!=='user'&&role!=='assistant')return;const container=node.closest('[data-testid^="conversation-turn-"]')||node.closest('article')||node;if(seen.has(container))return;seen.add(container);out.push({role,el:node,container});});return out;}
+    function getText(el){return el?(el.innerText||el.textContent||'').replace(/^You said:\s*/i,'').replace(/^Bạn đã nói:\s*/i,'').trim():'';}
+    function shortText(text){text=String(text||'').replace(/\s+/g,' ').trim();return text.length<=CONFIG.titleLength?text:text.slice(0,CONFIG.titleLength)+'…';}
 
-    function getText(el) {
-        if (!el) return '';
-        return (el.innerText || el.textContent || '').replace(/^You said:\s*/i, '').replace(/^Bạn đã nói:\s*/i, '').trim();
-    }
-    function shortText(text) {
-        text = String(text || '').replace(/\s+/g, ' ').trim();
-        return text.length <= CONFIG.titleLength ? text : text.slice(0, CONFIG.titleLength) + '…';
-    }
+    function compactAllChat(){compactChat=true;applyCompactChat();updateCompactButtons();}
+    function openAllChat(){compactChat=false;removeCompactChat();updateCompactButtons();}
+    function applyCompactChat(){const messages=getMessages();messages.forEach(m=>{m.el.classList.add('vada-message-compact');m.el.classList.remove('vada-message-expanded');});toast(`Đã thu gọn ${messages.length} tin nhắn`);}
+    function removeCompactChat(){document.querySelectorAll('.vada-message-compact').forEach(el=>el.classList.remove('vada-message-compact','vada-message-expanded'));toast('Đã mở toàn bộ hội thoại');}
+    function updateCompactButtons(){document.getElementById('vada-compact-chat')?.classList.toggle('active',compactChat);document.getElementById('vada-open-chat')?.classList.toggle('active',!compactChat);}
+    function compactClickHandler(event){if(!compactChat)return;const message=event.target.closest('.vada-message-compact');if(!message||event.target.closest('a,button,input,textarea,select')||window.getSelection()?.toString())return;message.classList.toggle('vada-message-expanded');}
+    function expandContainingMessage(element){if(!compactChat||!element)return;element.closest('[data-message-author-role]')?.classList.add('vada-message-expanded');}
 
-    function compactAllChat() {
-        compactChat = true;
-        applyCompactChat();
-        updateCompactButtons();
-    }
-    function openAllChat() {
-        compactChat = false;
-        removeCompactChat();
-        updateCompactButtons();
-    }
-    function applyCompactChat() {
-        const messages = getMessages();
-        messages.forEach(message => {
-            message.el.classList.add('vada-message-compact');
-            message.el.classList.remove('vada-message-expanded');
-        });
-        toast(`Đã thu gọn ${messages.length} tin nhắn`);
-    }
-    function removeCompactChat() {
-        document.querySelectorAll('.vada-message-compact').forEach(element => {
-            element.classList.remove('vada-message-compact','vada-message-expanded');
-        });
-        toast('Đã mở toàn bộ hội thoại');
-    }
-    function updateCompactButtons() {
-        const compactButton = document.getElementById('vada-compact-chat');
-        const openButton = document.getElementById('vada-open-chat');
-        compactButton?.classList.toggle('active', compactChat);
-        openButton?.classList.toggle('active', !compactChat);
-    }
-    function compactClickHandler(event) {
-        if (!compactChat) return;
-        const message = event.target.closest('.vada-message-compact');
-        if (!message) return;
-        if (event.target.closest('a,button,input,textarea,select')) return;
-        if (window.getSelection()?.toString()) return;
-        message.classList.toggle('vada-message-expanded');
-    }
-    function expandContainingMessage(element) {
-        if (!compactChat || !element) return;
-        const message = element.closest('[data-message-author-role]');
-        message?.classList.add('vada-message-expanded');
-    }
+    function scanQuestions(){questionCache=[];let number=0;getMessages().forEach(m=>{if(m.role!=='user')return;number++;questionCache.push({number,text:getText(m.el),element:m.container,messageElement:m.el});});updateStats();if(currentView==='questions')renderQuestions();if(compactChat)applyCompactChat();toast(`Đã quét ${questionCache.length} câu hỏi`);}
+    function scanCode(){codeCache=[];getCodeBlocksNow().forEach((pre,index)=>{const code=getCodeText(pre);codeCache.push({number:index+1,code,language:detectLanguage(pre),lines:Math.max(1,code.split('\n').length),element:pre});});updateStats();if(currentView==='code')renderCode();toast(`Đã quét ${codeCache.length} code`);}
+    function scanCurrentView(){currentView==='questions'?scanQuestions():scanCode();}
 
-    function scanQuestions() {
-        questionCache = [];
-        let number = 0;
-        getMessages().forEach(message => {
-            if (message.role !== 'user') return;
-            number++;
-            questionCache.push({ number, text: getText(message.el), element: message.container, messageElement: message.el });
-        });
-        updateStats();
-        if (currentView === 'questions') renderQuestions();
-        if (compactChat) applyCompactChat();
-        toast(`Đã quét ${questionCache.length} câu hỏi`);
-    }
-    function scanCode() {
-        codeCache = [];
-        getCodeBlocksNow().forEach((pre,index) => {
-            const code = getCodeText(pre);
-            codeCache.push({ number:index+1, code, language:detectLanguage(pre), lines:Math.max(1,code.split('\n').length), element:pre });
-        });
-        updateStats();
-        if (currentView === 'code') renderCode();
-        toast(`Đã quét ${codeCache.length} code`);
-    }
-    function scanCurrentView() { currentView === 'questions' ? scanQuestions() : scanCode(); }
+    function renderQuestions(){const list=document.getElementById('vada-list'),query=(document.getElementById('vada-search')?.value||'').trim().toLowerCase();list.innerHTML='';let shown=0;questionCache.forEach(item=>{if(query&&!item.text.toLowerCase().includes(query))return;shown++;const row=document.createElement('div');row.className='vada-item';row.innerHTML=`<span class="vada-number">Q${item.number}</span><span class="vada-text">${escapeHTML(shortText(item.text))}</span><button class="vada-copy-small" title="Copy">📋</button>`;on(row,'click',e=>{if(e.target.closest('.vada-copy-small'))return;item.messageElement?.classList.add('vada-message-expanded');scrollToElement(item.element);});on(row.querySelector('.vada-copy-small'),'click',e=>{e.stopPropagation();copyText(item.text);toast(`Đã copy Q${item.number}`);});list.appendChild(row);});if(!shown)list.innerHTML=`<div class="vada-empty">${questionCache.length?'Không tìm thấy':'Bấm "Quét" để tạo mục lục câu hỏi'}</div>`;}
+    function renderCode(){const list=document.getElementById('vada-list'),query=(document.getElementById('vada-search')?.value||'').trim().toLowerCase();list.innerHTML='';let shown=0;codeCache.forEach(item=>{if(query&&!item.code.toLowerCase().includes(query)&&!item.language.toLowerCase().includes(query))return;shown++;const row=document.createElement('div');row.className='vada-item';row.innerHTML=`<span class="vada-number">C${item.number}</span><span class="vada-text"><b>${escapeHTML(item.language)} • ${item.lines} dòng</b><br>${escapeHTML(shortText(item.code))}</span><button class="vada-copy-small">📋</button>`;on(row,'click',e=>{if(e.target.closest('.vada-copy-small'))return;expandContainingMessage(item.element);scrollToElement(item.element);});on(row.querySelector('.vada-copy-small'),'click',e=>{e.stopPropagation();copyText(item.code);toast(`Đã copy C${item.number}`);});list.appendChild(row);});if(!shown)list.innerHTML=`<div class="vada-empty">${codeCache.length?'Không tìm thấy':'Bấm "Quét" để tạo danh sách code'}</div>`;}
+    function renderCurrentView(){currentView==='questions'?renderQuestions():renderCode();}
 
-    function renderQuestions() {
-        const list = document.getElementById('vada-list');
-        const query = (document.getElementById('vada-search')?.value || '').trim().toLowerCase();
-        list.innerHTML = '';
-        let shown = 0;
-        questionCache.forEach(item => {
-            if (query && !item.text.toLowerCase().includes(query)) return;
-            shown++;
-            const row = document.createElement('div');
-            row.className = 'vada-item';
-            row.innerHTML = `<span class="vada-number">Q${item.number}</span><span class="vada-text">${escapeHTML(shortText(item.text))}</span><button class="vada-copy-small" title="Copy">📋</button>`;
-            on(row, 'click', event => {
-                if (event.target.closest('.vada-copy-small')) return;
-                item.messageElement?.classList.add('vada-message-expanded');
-                scrollToElement(item.element);
-            });
-            on(row.querySelector('.vada-copy-small'), 'click', event => {
-                event.stopPropagation();
-                copyText(item.text);
-                toast(`Đã copy Q${item.number}`);
-            });
-            list.appendChild(row);
-        });
-        if (!shown) list.innerHTML = `<div class="vada-empty">${questionCache.length ? 'Không tìm thấy' : 'Bấm "Quét" để tạo mục lục câu hỏi'}</div>`;
-    }
+    function getCodeBlocksNow(){return[...document.querySelectorAll('[data-message-author-role="assistant"] pre')];}
+    function getCodeText(pre){const code=pre?.querySelector('code');return(code?.innerText||pre?.innerText||'').trim();}
+    function detectLanguage(pre){const match=(pre?.querySelector('code')?.className||'').match(/language-([a-zA-Z0-9_+#-]+)/);return match?match[1]:'code';}
+    async function copyLatestCode(){const blocks=getCodeBlocksNow();if(!blocks.length)return toast('Không tìm thấy code');await copyText(getCodeText(blocks.at(-1)));toast('Đã copy code cuối');}
+    function goToLatestCode(){const blocks=getCodeBlocksNow();if(!blocks.length)return toast('Không tìm thấy code');expandContainingMessage(blocks.at(-1));scrollToElement(blocks.at(-1));}
+    function collapseAllCode(){const blocks=getCodeBlocksNow();blocks.forEach(pre=>pre.classList.add('vada-manual-code-collapsed'));toast(`Đã thu gọn ${blocks.length} code`);}
+    function expandAllCode(){const blocks=getCodeBlocksNow();blocks.forEach(pre=>pre.classList.remove('vada-manual-code-collapsed'));toast(`Đã mở ${blocks.length} code`);}
+    function wrapAllCode(){getCodeBlocksNow().forEach(pre=>pre.classList.add('vada-manual-code-wrap'));toast('Đã bật xuống dòng');}
+    function unwrapAllCode(){getCodeBlocksNow().forEach(pre=>pre.classList.remove('vada-manual-code-wrap'));toast('Đã về dòng gốc');}
 
-    function renderCode() {
-        const list = document.getElementById('vada-list');
-        const query = (document.getElementById('vada-search')?.value || '').trim().toLowerCase();
-        list.innerHTML = '';
-        let shown = 0;
-        codeCache.forEach(item => {
-            if (query && !item.code.toLowerCase().includes(query) && !item.language.toLowerCase().includes(query)) return;
-            shown++;
-            const row = document.createElement('div');
-            row.className = 'vada-item';
-            row.innerHTML = `<span class="vada-number">C${item.number}</span><span class="vada-text"><b>${escapeHTML(item.language)} • ${item.lines} dòng</b><br>${escapeHTML(shortText(item.code))}</span><button class="vada-copy-small">📋</button>`;
-            on(row, 'click', event => {
-                if (event.target.closest('.vada-copy-small')) return;
-                expandContainingMessage(item.element);
-                scrollToElement(item.element);
-            });
-            on(row.querySelector('.vada-copy-small'), 'click', event => {
-                event.stopPropagation();
-                copyText(item.code);
-                toast(`Đã copy C${item.number}`);
-            });
-            list.appendChild(row);
-        });
-        if (!shown) list.innerHTML = `<div class="vada-empty">${codeCache.length ? 'Không tìm thấy' : 'Bấm "Quét" để tạo danh sách code'}</div>`;
-    }
-    function renderCurrentView() { currentView === 'questions' ? renderQuestions() : renderCode(); }
+    async function copyLatestAnswer(){const messages=getMessages().filter(x=>x.role==='assistant');if(!messages.length)return toast('Không tìm thấy câu trả lời');await copyText(getText(messages.at(-1).el));toast('Đã copy GPT mới nhất');}
+    async function copyAllQuestions(){const messages=getMessages().filter(x=>x.role==='user');if(!messages.length)return toast('Không tìm thấy câu hỏi');await copyText(messages.map((x,i)=>`Q${i+1}. ${getText(x.el)}`).join('\n\n'));toast(`Đã copy ${messages.length} câu hỏi`);}
+    function updateStats(){const q=document.getElementById('vada-stat-q'),c=document.getElementById('vada-stat-code');if(q)q.textContent=questionCache.length?`${questionCache.length} câu hỏi`:'Chưa quét câu hỏi';if(c)c.textContent=codeCache.length?`${codeCache.length} code`:'Chưa quét code';}
+    function clearCache(){questionCache=[];codeCache=[];updateStats();document.getElementById('vada-list').innerHTML='<div class="vada-empty">Danh sách đã xóa</div>';toast('Đã xóa danh sách');}
 
-    function getCodeBlocksNow() { return [...document.querySelectorAll('[data-message-author-role="assistant"] pre')]; }
-    function getCodeText(pre) { const code = pre?.querySelector('code'); return (code?.innerText || pre?.innerText || '').trim(); }
-    function detectLanguage(pre) {
-        const match = (pre?.querySelector('code')?.className || '').match(/language-([a-zA-Z0-9_+#-]+)/);
-        return match ? match[1] : 'code';
-    }
-    async function copyLatestCode() {
-        const blocks = getCodeBlocksNow();
-        if (!blocks.length) return toast('Không tìm thấy code');
-        await copyText(getCodeText(blocks.at(-1)));
-        toast('Đã copy code cuối');
-    }
-    function goToLatestCode() {
-        const blocks = getCodeBlocksNow();
-        if (!blocks.length) return toast('Không tìm thấy code');
-        expandContainingMessage(blocks.at(-1));
-        scrollToElement(blocks.at(-1));
-    }
-    function collapseAllCode() { const blocks=getCodeBlocksNow(); blocks.forEach(pre=>pre.classList.add('vada-manual-code-collapsed')); toast(`Đã thu gọn ${blocks.length} code`); }
-    function expandAllCode() { const blocks=getCodeBlocksNow(); blocks.forEach(pre=>pre.classList.remove('vada-manual-code-collapsed')); toast(`Đã mở ${blocks.length} code`); }
-    function wrapAllCode() { getCodeBlocksNow().forEach(pre=>pre.classList.add('vada-manual-code-wrap')); toast('Đã bật xuống dòng'); }
-    function unwrapAllCode() { getCodeBlocksNow().forEach(pre=>pre.classList.remove('vada-manual-code-wrap')); toast('Đã về dòng gốc'); }
+    function renderPrompts(){const holder=document.getElementById('vada-prompts');CONFIG.quickPrompts.forEach(prompt=>{const button=document.createElement('button');button.className='vada-btn';button.textContent=prompt.name;button.title=prompt.text;on(button,'click',()=>insertPrompt(prompt.text));holder.appendChild(button);});}
+    function findComposer(){return document.querySelector('#prompt-textarea')||document.querySelector('textarea[data-id]')||document.querySelector('textarea[placeholder]')||document.querySelector('main [contenteditable="true"]');}
+    function insertPrompt(text){const composer=findComposer();if(!composer)return toast('Không tìm thấy ô nhập');composer.focus();const old=(composer.tagName==='TEXTAREA'?composer.value:composer.innerText||'').trim(),finalText=old?`${old}\n\n${text}`:text;if(composer.tagName==='TEXTAREA'){const descriptor=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');if(descriptor?.set)descriptor.set.call(composer,finalText);else composer.value=finalText;composer.dispatchEvent(new Event('input',{bubbles:true}));}else{composer.textContent=finalText;composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));}composer.focus();toast('Đã chèn prompt');}
 
-    async function copyLatestAnswer() {
-        const messages = getMessages().filter(item => item.role === 'assistant');
-        if (!messages.length) return toast('Không tìm thấy câu trả lời');
-        await copyText(getText(messages.at(-1).el));
-        toast('Đã copy GPT mới nhất');
-    }
-    async function copyAllQuestions() {
-        const messages = getMessages().filter(item => item.role === 'user');
-        if (!messages.length) return toast('Không tìm thấy câu hỏi');
-        await copyText(messages.map((item,index)=>`Q${index+1}. ${getText(item.el)}`).join('\n\n'));
-        toast(`Đã copy ${messages.length} câu hỏi`);
-    }
+    function findScrollContainer(target){let el=target?.parentElement;while(el&&el!==document.body&&el!==document.documentElement){const css=getComputedStyle(el),oy=css.overflowY;if((oy==='auto'||oy==='scroll')&&el.scrollHeight>el.clientHeight+40)return el;el=el.parentElement;}el=document.querySelector('main');while(el&&el!==document.body&&el!==document.documentElement){const css=getComputedStyle(el),oy=css.overflowY;if((oy==='auto'||oy==='scroll')&&el.scrollHeight>el.clientHeight+40)return el;el=el.parentElement;}return document.scrollingElement||document.documentElement;}
+    function scrollChat(direction){const turns=[...document.querySelectorAll('[data-testid^="conversation-turn-"]')],messages=getMessages(),target=direction==='top'?(turns[0]||messages[0]?.container||document.querySelector('main')):(turns.at(-1)||messages.at(-1)?.container||findComposer()||document.querySelector('main')),scroller=findScrollContainer(target);if(scroller){const top=direction==='top'?0:scroller.scrollHeight;try{scroller.scrollTo({top,behavior:'smooth'});}catch(_){scroller.scrollTop=top;}}if(target)setTimeout(()=>{try{target.scrollIntoView({behavior:'smooth',block:direction==='top'?'start':'end'});}catch(_){}},60);}
 
-    function updateStats() {
-        const q = document.getElementById('vada-stat-q');
-        const c = document.getElementById('vada-stat-code');
-        if (q) q.textContent = questionCache.length ? `${questionCache.length} câu hỏi` : 'Chưa quét câu hỏi';
-        if (c) c.textContent = codeCache.length ? `${codeCache.length} code` : 'Chưa quét code';
-    }
-    function clearCache() {
-        questionCache = [];
-        codeCache = [];
-        updateStats();
-        document.getElementById('vada-list').innerHTML = '<div class="vada-empty">Danh sách đã xóa</div>';
-        toast('Đã xóa danh sách');
-    }
-
-    function renderPrompts() {
-        const holder = document.getElementById('vada-prompts');
-        CONFIG.quickPrompts.forEach(prompt => {
-            const button = document.createElement('button');
-            button.className = 'vada-btn';
-            button.textContent = prompt.name;
-            button.title = prompt.text;
-            on(button, 'click', () => insertPrompt(prompt.text));
-            holder.appendChild(button);
-        });
-    }
-
-    function findComposer() {
-        return document.querySelector('#prompt-textarea') || document.querySelector('textarea[data-id]') || document.querySelector('textarea[placeholder]') || document.querySelector('main [contenteditable="true"]');
-    }
-    function insertPrompt(text) {
-        const composer = findComposer();
-        if (!composer) return toast('Không tìm thấy ô nhập');
-        composer.focus();
-        const old = (composer.tagName === 'TEXTAREA' ? composer.value : composer.innerText || '').trim();
-        const finalText = old ? `${old}\n\n${text}` : text;
-        if (composer.tagName === 'TEXTAREA') {
-            const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
-            if (descriptor?.set) descriptor.set.call(composer, finalText); else composer.value = finalText;
-            composer.dispatchEvent(new Event('input',{bubbles:true}));
-        } else {
-            composer.textContent = finalText;
-            composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));
-        }
-        composer.focus();
-        toast('Đã chèn prompt');
-    }
-
-    function findScrollContainer(target) {
-        let el = target?.parentElement;
-        while (el && el !== document.body && el !== document.documentElement) {
-            const css = getComputedStyle(el);
-            const oy = css.overflowY;
-            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 40) return el;
-            el = el.parentElement;
-        }
-        const main = document.querySelector('main');
-        el = main;
-        while (el && el !== document.body && el !== document.documentElement) {
-            const css = getComputedStyle(el);
-            const oy = css.overflowY;
-            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 40) return el;
-            el = el.parentElement;
-        }
-        return document.scrollingElement || document.documentElement;
-    }
-
-    function scrollChat(direction) {
-        const turns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
-        const messages = getMessages();
-        const target = direction === 'top'
-            ? (turns[0] || messages[0]?.container || document.querySelector('main'))
-            : (turns.at(-1) || messages.at(-1)?.container || findComposer() || document.querySelector('main'));
-        const scroller = findScrollContainer(target);
-        if (scroller) {
-            const top = direction === 'top' ? 0 : scroller.scrollHeight;
-            try { scroller.scrollTo({top, behavior:'smooth'}); } catch (_) { scroller.scrollTop = top; }
-        }
-        if (target) {
-            setTimeout(() => {
-                try { target.scrollIntoView({behavior:'smooth', block: direction === 'top' ? 'start' : 'end'}); } catch (_) {}
-            }, 60);
-        }
-    }
-
-    async function hotLoad() {
-        const button = document.getElementById('vada-load');
-        const oldText = button?.textContent || '↻ LOAD';
-        if (button) { button.disabled = true; button.textContent = '… LOAD'; }
+    function hotLoad(){
+        const button=document.getElementById('vada-load');
+        const oldText=button?.textContent||'↻ LOAD';
+        if(button){button.disabled=true;button.textContent='… LOAD';}
         toast('Đang tải bản mới từ GitHub...');
-        try {
-            const url = `${RAW_URL}?_=${Date.now()}`;
-            const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const code = await response.text();
-            if (!code.includes('// ==UserScript==') || !code.includes('VADA ChatGPT Toolkit')) throw new Error('Nội dung tải về không hợp lệ');
-            APP.destroy();
-            eval(code);
-        } catch (error) {
-            console.error('[VADA LOAD]', error);
-            if (button?.isConnected) { button.disabled = false; button.textContent = oldText; }
-            toast(`LOAD lỗi: ${error.message}`);
-        }
-    }
-
-    function bindPanelEvents() {
-        const panel = document.getElementById(IDS.panel);
-        on(panel.querySelector('.vada-close'),'click',closePanel);
-        on(panel.querySelector('#vada-close-bottom'),'click',closePanel);
-        panel.querySelectorAll('[data-view]').forEach(button => on(button,'click',() => {
-            currentView = button.dataset.view;
-            panel.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b === button));
-            renderCurrentView();
-        }));
-        on(panel.querySelector('#vada-search'),'input',renderCurrentView);
-        on(panel.querySelector('#vada-scan'),'click',scanCurrentView);
-        on(panel.querySelector('#vada-clear-cache'),'click',clearCache);
-        on(panel.querySelector('#vada-copy-last-code'),'click',copyLatestCode);
-        on(panel.querySelector('#vada-go-last-code'),'click',goToLatestCode);
-        on(panel.querySelector('#vada-collapse-code'),'click',collapseAllCode);
-        on(panel.querySelector('#vada-expand-code'),'click',expandAllCode);
-        on(panel.querySelector('#vada-wrap-code'),'click',wrapAllCode);
-        on(panel.querySelector('#vada-unwrap-code'),'click',unwrapAllCode);
-        on(panel.querySelector('#vada-compact-chat'),'click',compactAllChat);
-        on(panel.querySelector('#vada-open-chat'),'click',openAllChat);
-        on(panel.querySelector('#vada-copy-last-answer'),'click',copyLatestAnswer);
-        on(panel.querySelector('#vada-copy-all-questions'),'click',copyAllQuestions);
-        on(panel.querySelector('#vada-top'),'click',()=>scrollChat('top'));
-        on(panel.querySelector('#vada-bottom'),'click',()=>scrollChat('bottom'));
-        on(panel.querySelector('#vada-load'),'click',hotLoad);
-    }
-
-    function bindKeyboard() {
-        const handler = event => {
-            if (!event.altKey || !event.shiftKey) return;
-            const key = event.key.toLowerCase();
-            if (key === 'q') { event.preventDefault(); togglePanel(); }
-            if (key === 'c') { event.preventDefault(); copyLatestCode(); }
-            if (key === 'f') {
-                event.preventDefault(); openPanel();
-                const search = document.getElementById('vada-search');
-                search?.focus(); search?.select();
+        const url=`${RAW_URL}?_=${Date.now()}`;
+        GM_xmlhttpRequest({
+            method:'GET',
+            url,
+            headers:{'Cache-Control':'no-cache','Pragma':'no-cache'},
+            timeout:15000,
+            onload(response){
+                try{
+                    if(response.status<200||response.status>=300)throw new Error(`HTTP ${response.status}`);
+                    const code=response.responseText||'';
+                    if(!code.includes('// ==UserScript==')||!code.includes('VADA ChatGPT Toolkit'))throw new Error('Nội dung tải về không hợp lệ');
+                    APP.destroy();
+                    (0,eval)(code);
+                }catch(error){
+                    console.error('[VADA LOAD]',error);
+                    if(button?.isConnected){button.disabled=false;button.textContent=oldText;}
+                    toast(`LOAD lỗi: ${error.message}`);
+                }
+            },
+            onerror(){
+                if(button?.isConnected){button.disabled=false;button.textContent=oldText;}
+                toast('LOAD lỗi: không kết nối được GitHub Raw');
+            },
+            ontimeout(){
+                if(button?.isConnected){button.disabled=false;button.textContent=oldText;}
+                toast('LOAD lỗi: quá thời gian kết nối');
             }
-        };
-        on(document,'keydown',handler);
+        });
     }
 
-    function scrollToElement(el) {
-        if (!el) return;
-        expandContainingMessage(el);
-        try { el.scrollIntoView({behavior:'smooth',block:'center'}); } catch (_) {}
-        el.classList.add('vada-highlight');
-        const timer = setTimeout(() => el.classList.remove('vada-highlight'),1200);
-        APP.cleanups.push(() => clearTimeout(timer));
-    }
+    function bindPanelEvents(){const panel=document.getElementById(IDS.panel);on(panel.querySelector('.vada-close'),'click',closePanel);on(panel.querySelector('#vada-close-bottom'),'click',closePanel);panel.querySelectorAll('[data-view]').forEach(button=>on(button,'click',()=>{currentView=button.dataset.view;panel.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));renderCurrentView();}));on(panel.querySelector('#vada-search'),'input',renderCurrentView);on(panel.querySelector('#vada-scan'),'click',scanCurrentView);on(panel.querySelector('#vada-clear-cache'),'click',clearCache);on(panel.querySelector('#vada-copy-last-code'),'click',copyLatestCode);on(panel.querySelector('#vada-go-last-code'),'click',goToLatestCode);on(panel.querySelector('#vada-collapse-code'),'click',collapseAllCode);on(panel.querySelector('#vada-expand-code'),'click',expandAllCode);on(panel.querySelector('#vada-wrap-code'),'click',wrapAllCode);on(panel.querySelector('#vada-unwrap-code'),'click',unwrapAllCode);on(panel.querySelector('#vada-compact-chat'),'click',compactAllChat);on(panel.querySelector('#vada-open-chat'),'click',openAllChat);on(panel.querySelector('#vada-copy-last-answer'),'click',copyLatestAnswer);on(panel.querySelector('#vada-copy-all-questions'),'click',copyAllQuestions);on(panel.querySelector('#vada-top'),'click',()=>scrollChat('top'));on(panel.querySelector('#vada-bottom'),'click',()=>scrollChat('bottom'));on(panel.querySelector('#vada-load'),'click',hotLoad);}
+    function bindKeyboard(){const handler=event=>{if(!event.altKey||!event.shiftKey)return;const key=event.key.toLowerCase();if(key==='q'){event.preventDefault();togglePanel();}if(key==='c'){event.preventDefault();copyLatestCode();}if(key==='f'){event.preventDefault();openPanel();const search=document.getElementById('vada-search');search?.focus();search?.select();}};on(document,'keydown',handler);}
+    function scrollToElement(el){if(!el)return;expandContainingMessage(el);try{el.scrollIntoView({behavior:'smooth',block:'center'});}catch(_){}el.classList.add('vada-highlight');const timer=setTimeout(()=>el.classList.remove('vada-highlight'),1200);APP.cleanups.push(()=>clearTimeout(timer));}
 
-    function makeDraggable(panel) {
-        const header = panel.querySelector('.vada-header');
-        let dragging=false,startX=0,startY=0,startLeft=0,startTop=0;
-        const down = event => {
-            if (event.target.closest('button')) return;
-            dragging=true;
-            const rect=panel.getBoundingClientRect();
-            startX=event.clientX; startY=event.clientY; startLeft=rect.left; startTop=rect.top;
-            panel.style.right='auto';
-            event.preventDefault();
-        };
-        const move = event => {
-            if (!dragging) return;
-            let left=startLeft+event.clientX-startX;
-            let top=startTop+event.clientY-startY;
-            left=Math.max(0,Math.min(window.innerWidth-60,left));
-            top=Math.max(0,Math.min(window.innerHeight-50,top));
-            panel.style.left=`${left}px`; panel.style.top=`${top}px`;
-        };
-        const up = () => {
-            if (!dragging) return;
-            dragging=false;
-            const rect=panel.getBoundingClientRect();
-            GM_setValue('vada_manual_position',{left:rect.left,top:rect.top});
-        };
-        on(header,'mousedown',down); on(document,'mousemove',move); on(document,'mouseup',up);
-    }
+    function makeDraggable(panel){const header=panel.querySelector('.vada-header');let dragging=false,startX=0,startY=0,startLeft=0,startTop=0;const down=event=>{if(event.target.closest('button'))return;dragging=true;const rect=panel.getBoundingClientRect();startX=event.clientX;startY=event.clientY;startLeft=rect.left;startTop=rect.top;panel.style.right='auto';event.preventDefault();},move=event=>{if(!dragging)return;let left=startLeft+event.clientX-startX,top=startTop+event.clientY-startY;left=Math.max(0,Math.min(window.innerWidth-60,left));top=Math.max(0,Math.min(window.innerHeight-50,top));panel.style.left=`${left}px`;panel.style.top=`${top}px`;},up=()=>{if(!dragging)return;dragging=false;const rect=panel.getBoundingClientRect();GM_setValue('vada_manual_position',{left:rect.left,top:rect.top});};on(header,'mousedown',down);on(document,'mousemove',move);on(document,'mouseup',up);}
+    function restorePosition(panel){const position=GM_getValue('vada_manual_position',null);if(position&&position.left>=0&&position.left<window.innerWidth-50&&position.top>=0&&position.top<window.innerHeight-50){panel.style.left=`${position.left}px`;panel.style.top=`${position.top}px`;panel.style.right='auto';}}
+    async function copyText(text){if(!text)return;try{await navigator.clipboard.writeText(text);}catch(_){const textarea=document.createElement('textarea');textarea.value=text;textarea.style.position='fixed';textarea.style.opacity='0';document.body.appendChild(textarea);textarea.select();document.execCommand('copy');textarea.remove();}}
+    function toast(text){let box=document.getElementById(IDS.toast);if(!box){box=document.createElement('div');box.id=IDS.toast;document.body.appendChild(box);}box.textContent=text;clearTimeout(toastTimer);toastTimer=setTimeout(()=>box?.remove(),1300);}
+    function escapeHTML(text){return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;');}
 
-    function restorePosition(panel) {
-        const position = GM_getValue('vada_manual_position',null);
-        if (!position) return;
-        if (position.left>=0 && position.left<window.innerWidth-50 && position.top>=0 && position.top<window.innerHeight-50) {
-            panel.style.left=`${position.left}px`; panel.style.top=`${position.top}px`; panel.style.right='auto';
-        }
-    }
-
-    async function copyText(text) {
-        if (!text) return;
-        try { await navigator.clipboard.writeText(text); }
-        catch (_) {
-            const textarea=document.createElement('textarea');
-            textarea.value=text; textarea.style.position='fixed'; textarea.style.opacity='0';
-            document.body.appendChild(textarea); textarea.select(); document.execCommand('copy'); textarea.remove();
-        }
-    }
-
-    function toast(text) {
-        let box=document.getElementById(IDS.toast);
-        if (!box) { box=document.createElement('div'); box.id=IDS.toast; document.body.appendChild(box); }
-        box.textContent=text;
-        clearTimeout(toastTimer);
-        toastTimer=setTimeout(()=>box?.remove(),1300);
-    }
-
-    function escapeHTML(text) {
-        return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;');
-    }
-
-    function init() {
-        injectCSS();
-        createUI();
-        bindKeyboard();
-        on(document,'click',compactClickHandler,true);
-        updateCompactButtons();
-        console.log(`[VADA Chat Toolkit v${VERSION}] Running`);
-    }
-
-    if (document.readyState === 'loading') on(document,'DOMContentLoaded',init,{once:true}); else init();
+    function init(){injectCSS();createUI();bindKeyboard();on(document,'click',compactClickHandler,true);updateCompactButtons();console.log(`[VADA Chat Toolkit v${VERSION}] Running`);}
+    if(document.readyState==='loading')on(document,'DOMContentLoaded',init,{once:true});else init();
 })();
