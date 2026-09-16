@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         💬 ChatGPT - VADA Chat Toolkit - Mục lục • Code • Thu gọn 2 dòng
 // @namespace    https://chatgpt.com/
-// @version      4.2.0
+// @version      4.2.1
 // @description  ChatGPT Toolkit Manual - cực nhẹ, Navigator, Code, thu gọn 2 dòng, LOAD GitHub
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '4.2.0';
+    const VERSION = '4.2.1';
     const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%92%AC%20ChatGPT%20-%20VADA%20Chat%20Toolkit%20-%20M%E1%BB%A5c%20l%E1%BB%A5c%20%E2%80%A2%20Code%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%202%20d%C3%B2ng.user.js';
     const GLOBAL_KEY = '__VADA_CHAT_TOOLKIT__';
 
@@ -78,7 +78,7 @@
 #${IDS.toggle}{position:fixed;right:14px;top:75px;width:44px;height:44px;border:1px solid #333;border-radius:50%;background:#000;color:#fff;font-weight:700;font-size:15px;z-index:2147483646;cursor:pointer;box-shadow:0 5px 18px rgba(0,0,0,.45)}
 #${IDS.toggle}:hover{transform:scale(1.05)}
 #${IDS.panel}{position:fixed;top:70px;right:14px;width:${CONFIG.panelWidth}px;max-height:calc(100vh - 90px);display:none;flex-direction:column;background:#000;color:#fff;border:1px solid #333;border-radius:14px;box-shadow:0 15px 45px rgba(0,0,0,.65);z-index:2147483647;font-family:Arial,sans-serif;font-size:13px;overflow:hidden}
-#${IDS.panel} *{box-sizing:border-box}.vada-header{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;background:#000;border-bottom:1px solid #333;cursor:move;user-select:none}.vada-title{font-weight:700}.vada-version{color:#777;font-size:10px;margin-left:5px}.vada-close{border:none;background:transparent;color:#aaa;cursor:pointer;font-size:18px}.vada-body{padding:9px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;overscroll-behavior:contain;background:#000}.vada-search{width:100%;padding:8px 9px;border-radius:8px;border:1px solid #333;background:#000;color:#fff;outline:none}.vada-grid-1{display:grid;grid-template-columns:1fr;gap:5px}.vada-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vada-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.vada-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.vada-btn{padding:6px;border-radius:7px;border:1px solid #3a3a3a;background:#111;color:#eee;font-size:11px;cursor:pointer}.vada-btn:hover{background:#222}.vada-btn.active{background:#eee;color:#111;font-weight:bold}.vada-btn-red{background:#971f1f;color:#fff;border:1px solid #d24444;font-weight:700;min-height:34px}.vada-btn-red:hover{background:#bd2929}.vada-btn-red.active{background:#d32f2f;color:#fff;border-color:#ff6666}.vada-btn-load{background:#073d1f;border-color:#137a43;color:#8cffb4;font-weight:700}.vada-btn-load:hover{background:#0a5c2d}.vada-section{color:#999;font-size:10px;font-weight:bold;margin-top:3px}.vada-stats{display:flex;justify-content:space-between;color:#888;font-size:11px;padding:0 2px}.vada-list{max-height:36vh;overflow-y:auto;display:flex;flex-direction:column;gap:4px;overscroll-behavior:contain;background:#000}.vada-item{display:grid;grid-template-columns:38px 1fr 30px;gap:5px;align-items:start;padding:7px;border-radius:8px;background:#0b0b0b;border:1px solid #181818;cursor:pointer}.vada-item:hover{background:#161616}.vada-number{color:#ff7373;font-size:11px;font-weight:bold}.vada-text{color:#ddd;line-height:1.35;word-break:break-word}.vada-copy-small{border:none;background:transparent;color:#ccc;cursor:pointer}.vada-empty{padding:20px;color:#888;text-align:center}.vada-prompts{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+#${IDS.panel} *{box-sizing:border-box}.vada-header{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;background:#000;border-bottom:1px solid #333;cursor:move;user-select:none}.vada-title{font-weight:700}.vada-version{color:#777;font-size:10px;margin-left:5px}.vada-close{border:none;background:transparent;color:#aaa;cursor:pointer;font-size:18px}.vada-body{padding:9px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;overscroll-behavior:contain;background:#000}.vada-search{width:100%;padding:8px 9px;border-radius:8px;border:1px solid #333;background:#000;color:#fff;outline:none}.vada-grid-1{display:grid;grid-template-columns:1fr;gap:5px}.vada-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:5px}.vada-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.vada-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.vada-btn{padding:6px;border-radius:7px;border:1px solid #3a3a3a;background:#111;color:#eee;font-size:11px;cursor:pointer}.vada-btn:hover{background:#222}.vada-btn.active{background:#eee;color:#111;font-weight:bold}.vada-btn-red{background:#971f1f;color:#fff;border:1px solid #d24444;font-weight:700;min-height:34px}.vada-btn-red:hover{background:#bd2929}.vada-btn-red.active{background:#d32f2f;color:#fff;border-color:#ff6666}.vada-btn-open{background:#111;color:#fff;border:1px solid #555;font-weight:700;min-height:34px}.vada-btn-open:hover{background:#222}.vada-btn-open.active{background:#eaeaea;color:#111;border-color:#fff}.vada-btn-load{background:#073d1f;border-color:#137a43;color:#8cffb4;font-weight:700}.vada-btn-load:hover{background:#0a5c2d}.vada-section{color:#999;font-size:10px;font-weight:bold;margin-top:3px}.vada-stats{display:flex;justify-content:space-between;color:#888;font-size:11px;padding:0 2px}.vada-list{max-height:36vh;overflow-y:auto;display:flex;flex-direction:column;gap:4px;overscroll-behavior:contain;background:#000}.vada-item{display:grid;grid-template-columns:38px 1fr 30px;gap:5px;align-items:start;padding:7px;border-radius:8px;background:#0b0b0b;border:1px solid #181818;cursor:pointer}.vada-item:hover{background:#161616}.vada-number{color:#ff7373;font-size:11px;font-weight:bold}.vada-text{color:#ddd;line-height:1.35;word-break:break-word}.vada-copy-small{border:none;background:transparent;color:#ccc;cursor:pointer}.vada-empty{padding:20px;color:#888;text-align:center}.vada-prompts{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .vada-message-compact{position:relative!important;max-height:3.25em!important;overflow:hidden!important;cursor:pointer!important}.vada-message-compact:not(.vada-message-expanded)::after{content:'  Bấm để mở';position:absolute;right:0;bottom:0;padding:2px 7px;border-radius:5px 0 0 0;background:#a01919;color:#fff;font-family:Arial,sans-serif;font-size:10px;line-height:18px;pointer-events:none}.vada-message-compact.vada-message-expanded{max-height:none!important;overflow:visible!important;cursor:default!important}.vada-message-compact.vada-message-expanded::after{display:none!important}
 .vada-manual-code-collapsed{max-height:260px!important;overflow:hidden!important}.vada-manual-code-wrap,.vada-manual-code-wrap code{white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important}.vada-highlight{outline:3px solid rgba(255,70,70,.85)!important;outline-offset:3px;border-radius:8px}
 #${IDS.toast}{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);padding:8px 13px;border-radius:8px;background:#000;border:1px solid #333;color:#fff;z-index:2147483647;font-family:Arial;font-size:12px}
@@ -108,7 +108,7 @@
 <div class="vada-section">CODE</div>
 <div class="vada-grid-2"><button id="vada-copy-last-code" class="vada-btn">📋 Copy code cuối</button><button id="vada-go-last-code" class="vada-btn">↓ Đến code cuối</button><button id="vada-collapse-code" class="vada-btn">▰ Thu gọn code</button><button id="vada-expand-code" class="vada-btn">▤ Mở code</button><button id="vada-wrap-code" class="vada-btn">↩ Xuống dòng</button><button id="vada-unwrap-code" class="vada-btn">↔ Dòng gốc</button></div>
 <div class="vada-section">CHAT</div>
-<div class="vada-grid-1"><button id="vada-compact-chat" class="vada-btn vada-btn-red">🔴 Thu gọn hội thoại còn 2 dòng</button></div>
+<div class="vada-grid-2"><button id="vada-compact-chat" class="vada-btn vada-btn-red">🔴 Thu gọn 2 dòng</button><button id="vada-open-chat" class="vada-btn vada-btn-open active">▤ Mở toàn bộ</button></div>
 <div class="vada-grid-2"><button id="vada-copy-last-answer" class="vada-btn">📋 GPT mới nhất</button><button id="vada-copy-all-questions" class="vada-btn">📋 Tất cả câu hỏi</button></div>
 <div class="vada-section">PROMPT NHANH</div>
 <div id="vada-prompts" class="vada-prompts"></div>
@@ -163,10 +163,15 @@
         return text.length <= CONFIG.titleLength ? text : text.slice(0, CONFIG.titleLength) + '…';
     }
 
-    function toggleCompactChat() {
-        compactChat = !compactChat;
-        if (compactChat) applyCompactChat(); else removeCompactChat();
-        updateCompactButton();
+    function compactAllChat() {
+        compactChat = true;
+        applyCompactChat();
+        updateCompactButtons();
+    }
+    function openAllChat() {
+        compactChat = false;
+        removeCompactChat();
+        updateCompactButtons();
     }
     function applyCompactChat() {
         const messages = getMessages();
@@ -182,11 +187,11 @@
         });
         toast('Đã mở toàn bộ hội thoại');
     }
-    function updateCompactButton() {
-        const button = document.getElementById('vada-compact-chat');
-        if (!button) return;
-        button.classList.toggle('active', compactChat);
-        button.textContent = compactChat ? '🔴 Mở toàn bộ hội thoại' : '🔴 Thu gọn hội thoại còn 2 dòng';
+    function updateCompactButtons() {
+        const compactButton = document.getElementById('vada-compact-chat');
+        const openButton = document.getElementById('vada-open-chat');
+        compactButton?.classList.toggle('active', compactChat);
+        openButton?.classList.toggle('active', !compactChat);
     }
     function compactClickHandler(event) {
         if (!compactChat) return;
@@ -438,7 +443,8 @@
         on(panel.querySelector('#vada-expand-code'),'click',expandAllCode);
         on(panel.querySelector('#vada-wrap-code'),'click',wrapAllCode);
         on(panel.querySelector('#vada-unwrap-code'),'click',unwrapAllCode);
-        on(panel.querySelector('#vada-compact-chat'),'click',toggleCompactChat);
+        on(panel.querySelector('#vada-compact-chat'),'click',compactAllChat);
+        on(panel.querySelector('#vada-open-chat'),'click',openAllChat);
         on(panel.querySelector('#vada-copy-last-answer'),'click',copyLatestAnswer);
         on(panel.querySelector('#vada-copy-all-questions'),'click',copyAllQuestions);
         on(panel.querySelector('#vada-top'),'click',()=>scrollChat('top'));
@@ -525,7 +531,7 @@
     }
 
     function escapeHTML(text) {
-        return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+        return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;');
     }
 
     function init() {
@@ -533,6 +539,7 @@
         createUI();
         bindKeyboard();
         on(document,'click',compactClickHandler,true);
+        updateCompactButtons();
         console.log(`[VADA Chat Toolkit v${VERSION}] Running`);
     }
 
