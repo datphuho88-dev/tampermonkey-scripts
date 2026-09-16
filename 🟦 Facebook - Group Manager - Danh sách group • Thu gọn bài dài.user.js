@@ -1,22 +1,23 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.1
-// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload kiểu ACB.
+// @version      1.4.2
+// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
 // @match        https://facebook.com/*
 // @updateURL    https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js
 // @downloadURL  https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const VERSION = '1.4.1';
-  const API = 'https://api.github.com/repos/datphuho88-dev/tampermonkey-scripts/contents/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
+  const VERSION = '1.4.2';
+  const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
   const STYLE_ID = 'vada-fb-group-manager-style';
@@ -141,30 +142,49 @@
     });
   }
 
-  async function latestCode() {
-    const res = await fetch(API + '?ref=main&_=' + Date.now(), {
-      cache: 'no-store',
-      credentials: 'omit',
-      headers: { Accept: 'application/vnd.github+json' }
+  function latestCode() {
+    return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest !== 'function') {
+        reject(new Error('Thiếu quyền GM_xmlhttpRequest. Hãy cài lại v1.4.2 một lần.'));
+        return;
+      }
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: RAW_URL + '?_=' + Date.now(),
+        headers: {
+          'Cache-Control': 'no-cache, no-store, max-age=0',
+          'Pragma': 'no-cache'
+        },
+        timeout: 15000,
+        onload(res) {
+          if (res.status < 200 || res.status >= 300) {
+            reject(new Error('GitHub Raw HTTP ' + res.status));
+            return;
+          }
+          const source = String(res.responseText || '');
+          if (!source.includes('// ==UserScript==') || source.length < 500) {
+            reject(new Error('Code tải về không hợp lệ'));
+            return;
+          }
+          resolve(source);
+        },
+        onerror() { reject(new Error('Không kết nối được GitHub Raw')); },
+        ontimeout() { reject(new Error('GitHub Raw phản hồi quá lâu')); }
+      });
     });
-    if (!res.ok) throw new Error('GitHub API HTTP ' + res.status);
-    const data = await res.json();
-    const b64 = String(data.content || '').replace(/\s/g, '');
-    if (!b64) throw new Error('Không đọc được code GitHub');
-    return new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
   }
 
   async function hotReload() {
     const btn = $('#vada-fb-load');
     if (btn) { btn.disabled = true; btn.textContent = '↻ ĐANG LOAD...'; }
-    toast('Đang lấy code mới nhất từ GitHub...');
+    toast('Đang lấy code mới nhất từ GitHub Raw...');
     try {
       const source = await latestCode();
       const match = source.match(/\/\/\s*@version\s+([^\s]+)/);
       const code = source.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\s*/, '');
       toast(`Đã lấy v${match?.[1] || '?'} • đang chạy...`);
       setTimeout(() => {
-        try { new Function(code)(); }
+        try { new Function('GM_xmlhttpRequest', code)(GM_xmlhttpRequest); }
         catch (err) {
           console.error('[VADA FB] LOAD lỗi:', err);
           alert('FB LOAD lỗi: ' + err.message);
