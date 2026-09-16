@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🏦 ACB | Xuất Excel | Tự tải đủ 12 tháng
 // @namespace    acb-auto-export
-// @version      1.3.0
-// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ; có chọn ô đăng nhập/mật khẩu, kiểm tra nút tải, dừng và hot-load chống cache
+// @version      1.3.1
+// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ; có chọn ô đăng nhập/mật khẩu, kích hoạt 2 ô bằng điền 1 rồi xóa, kiểm tra nút tải, dừng và hot-load chống cache
 // @match        https://*.acb.com.vn/*
 // @grant        none
 // @run-at       document-idle
@@ -13,7 +13,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = '1.3.0';
+    const SCRIPT_VERSION = '1.3.1';
     const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
     const API_URL = 'https://api.github.com/repos/datphuho88-dev/tampermonkey-scripts/contents/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
     const INSTANCE_KEY = '__ACB_AUTO_EXPORT_INSTANCE__';
@@ -227,6 +227,54 @@
         if (flashElement(user, '#2563eb', 'TÊN ĐĂNG NHẬP')) found++;
         if (flashElement(pass, '#7c3aed', 'MẬT KHẨU')) found++;
         setStatus(`Kiểm tra đăng nhập: tìm thấy ${found}/2`, found === 2 ? 'success' : 'warning');
+    }
+
+    function setFieldValue(el, value) {
+        if (!el) return;
+        if (el instanceof HTMLInputElement) {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+            if (setter) setter.call(el, value); else el.value = value;
+        } else if (el instanceof HTMLTextAreaElement) {
+            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+            if (setter) setter.call(el, value); else el.value = value;
+        } else if (el.isContentEditable) {
+            el.textContent = value;
+        } else {
+            return;
+        }
+        el.dispatchEvent(new Event('input', { bubbles:true }));
+        el.dispatchEvent(new Event('change', { bubbles:true }));
+    }
+
+    async function touchLoginFields() {
+        const user = getSavedTarget(LOGIN_USER_KEY);
+        const pass = getSavedTarget(LOGIN_PASS_KEY);
+        if (!user || !pass) {
+            setStatus('Chưa chọn đủ 2 ô tên đăng nhập và mật khẩu', 'error');
+            return;
+        }
+
+        const steps = [
+            [user, 'TÊN ĐĂNG NHẬP'],
+            [pass, 'MẬT KHẨU']
+        ];
+
+        for (const [el, label] of steps) {
+            if (!visible(el)) {
+                setStatus(`Không thấy ô ${label}`, 'error');
+                return;
+            }
+            setStatus(`Đang kích hoạt ô ${label}: điền 1...`);
+            try { el.focus(); } catch {}
+            setFieldValue(el, '1');
+            await sleep(350);
+            setStatus(`Đang kích hoạt ô ${label}: xóa...`);
+            setFieldValue(el, '');
+            await sleep(250);
+        }
+
+        try { pass.focus(); } catch {}
+        setStatus('Đã điền 1 rồi xóa lần lượt cả 2 ô', 'success');
     }
 
     function findSelectByLabel(labelText) {
@@ -482,10 +530,10 @@
         loginTools.append(pickUser, pickPass);
 
         const loginCheck = document.createElement('div');
-        loginCheck.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
-        const checkLogin = makeButton('🔐 Kiểm tra ô đăng nhập', 'acb-auto-check-login', '#475569', testSavedLoginFields);
-        checkLogin.style.flex = '1';
-        loginCheck.append(checkLogin);
+        loginCheck.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px';
+        const checkLogin = makeButton('🔐 Kiểm tra ô', 'acb-auto-check-login', '#475569', testSavedLoginFields);
+        const fillPass = makeButton('✏ Điền MK', 'acb-auto-touch-login', '#c2410c', touchLoginFields);
+        loginCheck.append(checkLogin, fillPass);
 
         const actions = document.createElement('div');
         actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
@@ -505,7 +553,7 @@
         status.style.cssText = 'margin-top:8px;padding-top:7px;border-top:1px solid #e5e7eb;font-size:11px;font-weight:600';
 
         const help = document.createElement('div');
-        help.textContent = 'Chọn ô đăng nhập/mật khẩu chỉ lưu vị trí thành phần, không lưu nội dung mật khẩu. Trước mỗi lần tải, script tự kiểm tra lại nút Xuất Excel.';
+        help.textContent = 'Điền MK sẽ lần lượt điền số 1 rồi xóa ở ô tên đăng nhập và ô mật khẩu. Script không lưu nội dung mật khẩu.';
         help.style.cssText = 'margin-top:5px;font-size:10px;color:#6b7280;line-height:1.35';
 
         panel.append(head, loginTools, loginCheck, actions, tools, status, help);
@@ -529,6 +577,7 @@
         hotReload,
         testElements,
         testSavedLoginFields,
+        touchLoginFields,
         verifyExportButton
     };
 
