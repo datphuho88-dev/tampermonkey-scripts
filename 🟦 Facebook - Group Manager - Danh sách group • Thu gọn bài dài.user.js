@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.0
-// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh duyệt bài, kéo panel và hot reload kiểu ACB.
+// @version      1.4.1
+// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload kiểu ACB.
 // @author       VADA
 // @match        https://www.facebook.com/*
 // @match        https://facebook.com/*
@@ -15,7 +15,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.4.0';
+  const VERSION = '1.4.1';
   const API = 'https://api.github.com/repos/datphuho88-dev/tampermonkey-scripts/contents/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -25,6 +25,7 @@
   const IMAGE_KEY = 'vada_fb_hide_review_images_v1';
   const TARGET_ATTR = 'data-vada-fb-collapse-target';
   const IMAGE_ATTR = 'data-vada-fb-image-hidden';
+  const VIDEO_ATTR = 'data-vada-fb-video-hidden';
   const BOX_ATTR = 'data-vada-fb-media-box-hidden';
   const MAX_LINES = 3;
   const MIN_TEXT = 120;
@@ -39,6 +40,7 @@
   let hiddenCount = 0;
 
   const imageStyles = new Map();
+  const videoStyles = new Map();
   const boxStyles = new Map();
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -194,7 +196,7 @@
       #${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;background:#fce8e8;color:#c62828;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
       [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
       [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
-      [${IMAGE_ATTR}="1"],[${BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;pointer-events:none!important}
+      [${IMAGE_ATTR}="1"],[${VIDEO_ATTR}="1"],[${BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;pointer-events:none!important}
       .vada-fb-expand-wrap{margin:3px 0!important}.vada-fb-expand-btn{border:0!important;background:transparent!important;padding:2px 0!important;color:#0866ff!important;cursor:pointer!important;font:700 12px Arial,sans-serif!important}
       #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#1c1e21;color:#fff;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
     `;
@@ -230,7 +232,7 @@
         return renderGroups();
       }
       if (e.target.closest('#vada-fb-add-current')) return addCurrentGroup();
-      if (e.target.closest('#vada-fb-rescan')) { resetCollapsed(); scanPosts(); applyImageHiding(true); return toast(`Đã quét lại • ẩn ${hiddenCount} ảnh.`); }
+      if (e.target.closest('#vada-fb-rescan')) { resetCollapsed(); scanPosts(); applyImageHiding(true); return toast(`Đã quét lại • ẩn ${hiddenCount} ảnh/video.`); }
       if (e.target.closest('#vada-fb-hide-images')) return setHideImages(!hideImages);
       if (e.target.closest('#vada-fb-load')) return hotReload();
       if (e.target.closest('#vada-fb-toggle')) {
@@ -314,15 +316,24 @@
     return Math.max(r.width, img.width || 0, img.naturalWidth || 0) >= 180 && Math.max(r.height, img.height || 0, img.naturalHeight || 0) >= 120;
   }
 
-  function mediaBox(img) {
-    const article = img.closest('[role="article"]');
-    let node = img.parentElement, best = null;
+  function isPostVideo(video) {
+    if (!(video instanceof HTMLVideoElement) || video.closest(`#${PANEL_ID}`)) return false;
+    if (!video.closest('main,[role="main"],[role="article"]')) return false;
+    const r = video.getBoundingClientRect();
+    const w = Math.max(r.width, video.clientWidth || 0, video.videoWidth || 0);
+    const h = Math.max(r.height, video.clientHeight || 0, video.videoHeight || 0);
+    return w >= 120 && h >= 80;
+  }
+
+  function mediaBox(media) {
+    const article = media.closest('[role="article"]');
+    let node = media.parentElement, best = null;
     for (let i = 0; i < 7 && node && node !== article; i++, node = node.parentElement) {
       if (node.closest(`#${PANEL_ID}`)) break;
       if (node.querySelectorAll('button,input,textarea,[role="button"]').length) break;
       if (text(node).length > 40) break;
       const r = node.getBoundingClientRect();
-      if (node.querySelectorAll('img').length <= 20 && r.width >= 140 && r.height >= 80) best = node;
+      if (node.querySelectorAll('img,video').length <= 20 && r.width >= 140 && r.height >= 80) best = node;
     }
     return best;
   }
@@ -341,33 +352,51 @@
     return true;
   }
 
+  function hideVideo(video) {
+    if (!isPostVideo(video)) return false;
+    try { video.pause(); } catch (_) {}
+    saveStyle(videoStyles, video, ['display','visibility','opacity','width','height','min-width','min-height','max-width','max-height','margin','padding','pointer-events']);
+    video.setAttribute(VIDEO_ATTR, '1');
+    for (const [p, v] of Object.entries({display:'none',visibility:'hidden',opacity:'0',width:'0px',height:'0px','min-width':'0px','min-height':'0px','max-width':'0px','max-height':'0px',margin:'0px',padding:'0px','pointer-events':'none'})) video.style.setProperty(p, v, 'important');
+    const box = mediaBox(video);
+    if (box) {
+      saveStyle(boxStyles, box, ['display','visibility','height','min-height','max-height','margin','padding','overflow']);
+      box.setAttribute(BOX_ATTR, '1');
+      for (const [p, v] of Object.entries({display:'none',visibility:'hidden',height:'0px','min-height':'0px','max-height':'0px',margin:'0px',padding:'0px',overflow:'hidden'})) box.style.setProperty(p, v, 'important');
+    }
+    return true;
+  }
+
   function applyImageHiding(recount = false, root = document) {
     if (!hideImages) return;
     if (root instanceof HTMLImageElement && !root.hasAttribute(IMAGE_ATTR)) hideImage(root);
+    if (root instanceof HTMLVideoElement && !root.hasAttribute(VIDEO_ATTR)) hideVideo(root);
     root.querySelectorAll?.('img').forEach(img => { if (!img.hasAttribute(IMAGE_ATTR)) hideImage(img); });
-    if (recount) hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
-    else hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
+    root.querySelectorAll?.('video').forEach(video => { if (!video.hasAttribute(VIDEO_ATTR)) hideVideo(video); });
+    hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}],video[${VIDEO_ATTR}]`).length;
     updateImageButton();
   }
 
   function restoreImages() {
     restoreStyle(imageStyles, IMAGE_ATTR);
+    restoreStyle(videoStyles, VIDEO_ATTR);
     restoreStyle(boxStyles, BOX_ATTR);
     $$(`[${IMAGE_ATTR}]`).forEach(el => el.removeAttribute(IMAGE_ATTR));
+    $$(`[${VIDEO_ATTR}]`).forEach(el => el.removeAttribute(VIDEO_ATTR));
     $$(`[${BOX_ATTR}]`).forEach(el => el.removeAttribute(BOX_ATTR));
     hiddenCount = 0;
   }
 
   function updateImageButton() {
     const btn = $('#vada-fb-hide-images');
-    if (btn) btn.textContent = hideImages ? `🖼 Hiện ảnh (${hiddenCount} đã ẩn)` : '🖼 Ẩn toàn bộ ảnh';
+    if (btn) btn.textContent = hideImages ? `🎞 Hiện ảnh/video (${hiddenCount} đã ẩn)` : '🎞 Ẩn toàn bộ ảnh + video';
   }
 
   function setHideImages(v) {
     hideImages = !!v;
     localStorage.setItem(IMAGE_KEY, hideImages ? '1' : '0');
-    if (hideImages) { applyImageHiding(true); toast(`Đã ẩn ${hiddenCount} ảnh.`); }
-    else { restoreImages(); updateImageButton(); toast('Đã hiện lại ảnh.'); }
+    if (hideImages) { applyImageHiding(true); toast(`Đã ẩn ${hiddenCount} ảnh/video.`); }
+    else { restoreImages(); updateImageButton(); toast('Đã hiện lại ảnh/video.'); }
   }
 
   function scheduleScan() {
