@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🧰 VADA | Auto Workflow | Chọn ngày → Tìm kiếm → Tải file | 12 tháng
 // @namespace    vada.chrome.workflow
-// @version      2.2.0
+// @version      2.2.1
 // @description  Chọn nhanh ngày, ghi nhớ nút tìm/tải, chạy tự động theo tháng, hot-load bản mới không cần F5
 // @match        https://hoadondientu.gdt.gov.vn/*
 // @grant        none
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '2.2.0';
+  const SCRIPT_VERSION = '2.2.1';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%A7%B0%20VADA%20-%20Auto%20Workflow%20-%20Ch%E1%BB%8Dn%20ng%C3%A0y%20%E2%80%A2%20T%C3%ACm%20ki%E1%BA%BFm%20%E2%80%A2%20T%E1%BA%A3i%20file%20%E2%80%A2%2012%20th%C3%A1ng.user.js';
   const INSTANCE_KEY = '__VADA_AUTO_WORKFLOW_INSTANCE__';
   const PANEL_ID='vada-auto-panel', LAUNCHER_ID='vada-auto-launcher';
@@ -125,7 +125,7 @@
     const s=await waitRole('search',5000);if(!s)throw new Error('Không tìm thấy nút Tìm kiếm');status(`${label} - đang bấm Tìm kiếm...`);await clickEl(s);await sleep(state.delays.afterSearch);if(stopRequested)return false;
     const d=await waitRole('download',15000);if(!d)throw new Error('Không tìm thấy nút Tải về');status(`${label} - đang Tải về...`);await clickEl(d);if(state.delays.afterDownload)await sleep(state.delays.afterDownload);return true;
   }
-  async function runSingle(){if(running||!validate())return;const f=document.querySelector('#vada-date1-value')?.value,t=document.querySelector('#vada-date2-value')?.value;if(!f||!t){status('❌ Chưa nhập đủ ngày','error');return}state.single={date1:f,date2:t};save();running=true;stopRequested=false;refreshRun();try{await runOne(f,t,'Chạy 1 lần');if(!stopRequested)status('✅ Hoàn tất','success')}catch(e){console.error(e);status('❌ '+e.message,'error')}finally{running=false;refreshRun()}}
+  async function runSingle(){if(running||!validate())return;const f=state.single?.date1,t=state.single?.date2;if(!f||!t){status('❌ Chưa chọn khoảng ngày','error');return}running=true;stopRequested=false;refreshRun();try{await runOne(f,t,'Chạy 1 lần');if(!stopRequested)status('✅ Hoàn tất','success')}catch(e){console.error(e);status('❌ '+e.message,'error')}finally{running=false;refreshRun()}}
   async function runAll(){if(running||!validate())return;const y=+document.querySelector('#vada-batch-year')?.value;if(!y||y<2000||y>2100){status('❌ Năm không hợp lệ','error');return}state.batchYear=y;save();running=true;stopRequested=false;refreshRun();try{for(let m=1;m<=12&&!stopRequested;m++){const f=isoDate(y,m,1),t=isoDate(y,m,lastDay(m,y));status(`Tháng ${m}/12 - ${dmyFromISO(f)} → ${dmyFromISO(t)}`);await runOne(f,t,`Tháng ${m}/12`)}status(stopRequested?'⏹ Đã dừng':`✅ Đã chạy đủ 12 tháng năm ${y}`,stopRequested?'warning':'success')}catch(e){console.error(e);status('❌ '+e.message,'error')}finally{running=false;refreshRun()}}
   function stop(){if(!running){status('Không có tiến trình đang chạy');return}stopRequested=true;status('⏹ Đang dừng...','warning')}
 
@@ -153,11 +153,11 @@
 
     const s2=document.createElement('div');s2.style.cssText='border-top:1px solid #ddd;margin-top:8px;padding-top:9px';s2.innerHTML='<b>2. Chạy một khoảng ngày</b>';
     const yr=document.createElement('div');yr.style.cssText='display:flex;align-items:center;gap:6px;margin-top:7px';yr.append('Năm: ');const ys=document.createElement('select');ys.id='vada-quick-year';ys.style.cssText='padding:5px 8px;border:1px solid #bbb;border-radius:5px';const now=new Date(),cy=now.getFullYear(),cm=now.getMonth()+1;for(let y=cy+1;y>=cy-5;y--){const o=document.createElement('option');o.value=o.textContent=y;o.selected=y===cy;ys.appendChild(o)}yr.appendChild(ys);s2.appendChild(yr);
-    function quick(f,t){const a=document.querySelector('#vada-date1-value'),b=document.querySelector('#vada-date2-value');if(!a||!b)return;a.value=f;b.value=t;state.single={date1:f,date2:t};save();status(`✅ ${dmyFromISO(f)} → ${dmyFromISO(t)}`,'success')}
+    function quick(f,t){state.single={date1:f,date2:t};save();status(`✅ ${dmyFromISO(f)} → ${dmyFromISO(t)}`,'success')}
     const common=document.createElement('div');common.style.cssText='display:flex;flex-wrap:wrap;margin-top:6px';common.append(button('Hôm nay',()=>{const d=new Date(),v=isoDate(d.getFullYear(),d.getMonth()+1,d.getDate());quick(v,v)},'#555'),button('7 ngày',()=>{const t=new Date(),f=new Date();f.setDate(t.getDate()-6);quick(isoDate(f.getFullYear(),f.getMonth()+1,f.getDate()),isoDate(t.getFullYear(),t.getMonth()+1,t.getDate()))},'#555'),button('30 ngày',()=>{const t=new Date(),f=new Date();f.setDate(t.getDate()-29);quick(isoDate(f.getFullYear(),f.getMonth()+1,f.getDate()),isoDate(t.getFullYear(),t.getMonth()+1,t.getDate()))},'#555'),button('Tháng này',()=>quick(isoDate(cy,cm,1),isoDate(cy,cm,lastDay(cm,cy))),'#555'),button('Tháng trước',()=>{let y=cy,m=cm-1;if(m===0){m=12;y--}quick(isoDate(y,m,1),isoDate(y,m,lastDay(m,y)))},'#555'));s2.appendChild(common);
     const qs=[['Q1',[1,2,3],'#2563eb'],['Q2',[4,5,6],'#15803d'],['Q3',[7,8,9],'#2563eb'],['Q4',[10,11,12],'#15803d']],updates=[];
     for(const[q,months,color]of qs){const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;flex-wrap:wrap;margin-top:3px';const l=document.createElement('b');l.textContent=q+':';l.style.width='28px';row.appendChild(l);for(const m of months){const b=button('',()=>{const y=+ys.value;quick(isoDate(y,m,1),isoDate(y,m,lastDay(m,y)))},color);const u=()=>{const y=+ys.value;b.textContent=`T${m} (1-${lastDay(m,y)})`;b.style.background=(m===cm&&y===cy)?'#dc2626':color;b.title=(m===cm&&y===cy)?'Tháng hiện tại':''};u();updates.push(u);row.appendChild(b)}row.appendChild(button('Cả quý',()=>{const y=+ys.value,a=months[0],z=months[2];quick(isoDate(y,a,1),isoDate(y,z,lastDay(z,y)))},color));s2.appendChild(row)}ys.addEventListener('change',()=>updates.forEach(f=>f()));
-    const dr=document.createElement('div');dr.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px';const d1=document.createElement('input'),d2=document.createElement('input');d1.type=d2.type='date';d1.id='vada-date1-value';d2.id='vada-date2-value';d1.value=state.single.date1;d2.value=state.single.date2;for(const x of[d1,d2])x.style.cssText='width:100%;box-sizing:border-box;padding:6px;border:1px solid #bbb;border-radius:5px';d1.onchange=()=>{state.single.date1=d1.value;save()};d2.onchange=()=>{state.single.date2=d2.value;save()};dr.append(d1,d2);s2.appendChild(dr);const rs=button('▶ Chạy khoảng ngày này',runSingle,'#15803d');rs.id='vada-run-single';s2.appendChild(rs);p.appendChild(s2);
+    const rs=button('▶ Chạy khoảng ngày đã chọn',runSingle,'#15803d');rs.id='vada-run-single';s2.appendChild(rs);p.appendChild(s2);
 
     const s3=document.createElement('div');s3.style.cssText='border-top:1px solid #ddd;margin-top:8px;padding-top:9px';s3.innerHTML='<b>3. Độ trễ</b>';const addDelay=(label,key,vals)=>{const r=document.createElement('div');r.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-top:6px';r.append(label);const sel=delaySelect(state.delays[key],vals);sel.onchange=()=>{state.delays[key]=+sel.value;save()};r.appendChild(sel);s3.appendChild(r)};addDelay('Sau khi điền ngày:','afterDates',[0,200,500,1000,2000]);addDelay('Tìm kiếm → Tải:','afterSearch',[500,1000,1500,2000,3000,5000,8000,10000]);addDelay('Tải → tháng tiếp:','afterDownload',[500,1000,1500,2000,3000,5000]);p.appendChild(s3);
 
