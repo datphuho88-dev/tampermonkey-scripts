@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.2.0
-// @description  Quản lý danh sách group Facebook, thu gọn bài viết dài, kéo panel và hot reload từ GitHub.
+// @version      1.3.1
+// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh duyệt bài, kéo panel và hot reload từ GitHub.
 // @author       VADA
 // @match        https://www.facebook.com/*
 // @match        https://facebook.com/*
@@ -16,14 +16,17 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.1';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const STORAGE_KEY = 'vada_fb_group_manager_groups_v1';
   const POS_KEY = 'vada_fb_group_manager_position_v1';
+  const IMAGE_HIDE_KEY = 'vada_fb_hide_review_images_v1';
   const PANEL_ID = 'vada-fb-group-manager';
   const STYLE_ID = 'vada-fb-group-manager-style';
+  const IMAGE_STYLE_ID = 'vada-fb-image-hide-style';
   const ARTICLE_ATTR = 'data-vada-fb-article-ready';
   const TARGET_ATTR = 'data-vada-fb-collapse-target';
+  const MEDIA_BOX_ATTR = 'data-vada-fb-media-box-hidden';
   const MAX_LINES = 3;
   const MIN_TEXT_LENGTH = 120;
 
@@ -32,7 +35,7 @@
   let toastTimer = 0;
   let dragMoveHandler = null;
   let dragUpHandler = null;
-  const originalStyles = new Map();
+  let hideImages = loadImageHideState();
 
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -46,6 +49,13 @@
 
   function saveGroups(groups) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
+  }
+
+  function loadImageHideState() {
+    const saved = localStorage.getItem(IMAGE_HIDE_KEY);
+    if (saved === '1') return true;
+    if (saved === '0') return false;
+    return /\/groups\/[^/]+\/(pending_posts|manage|admin_activities|reported|quality)/i.test(location.pathname);
   }
 
   function normalizeUrl(url) {
@@ -192,12 +202,14 @@
         <div class="vada-fb-section-title">📑 ĐỌC NHANH BÀI DÀI</div>
         <div class="vada-fb-status">Bài dài tự thu gọn còn ${MAX_LINES} dòng.</div>
         <button id="vada-fb-rescan" class="vada-fb-secondary">↻ Quét lại bài viết</button>
+        <button id="vada-fb-hide-images" class="vada-fb-secondary"></button>
         <button id="vada-fb-load" class="vada-fb-load">↻ LOAD</button>
       </div>`;
     document.body.appendChild(panel);
     loadPosition(panel);
     enableDrag(panel);
     renderGroupList();
+    updateImageButton();
 
     panel.addEventListener('click', event => {
       const open = event.target.closest('.vada-fb-group-open');
@@ -208,7 +220,12 @@
       if (event.target.closest('#vada-fb-rescan')) {
         resetCollapsedPosts();
         scanPosts();
+        applyImageHiding();
         return showToast('Đã quét lại bài viết.');
+      }
+      if (event.target.closest('#vada-fb-hide-images')) {
+        setHideImages(!hideImages);
+        return;
       }
       if (event.target.closest('#vada-fb-load')) return loadLatest();
       if (event.target.closest('#vada-fb-toggle')) {
@@ -245,6 +262,8 @@
       #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
       #${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;background:#fce8e8;color:#c62828;font-size:18px}
       #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
+      [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
+      [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
       .vada-fb-expand-wrap{margin:4px 0 2px!important;text-align:left!important;position:relative!important;z-index:5!important}
       .vada-fb-expand-btn{appearance:none!important;border:0!important;background:transparent!important;padding:2px 0!important;color:#0866ff!important;cursor:pointer!important;font:700 12px/1.3 Arial,sans-serif!important}
       #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#1c1e21;color:#fff;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
@@ -262,36 +281,28 @@
     toastTimer = setTimeout(() => toast.remove(), 1800);
   }
 
+  function cleanText(el) {
+    return (el?.innerText || '').replace(/\s+/g, ' ').trim();
+  }
+
   function isVisible(el) {
     if (!(el instanceof HTMLElement)) return false;
     const s = getComputedStyle(el);
     return s.display !== 'none' && s.visibility !== 'hidden' && el.getClientRects().length > 0;
   }
 
-  function cleanText(el) {
-    return (el?.innerText || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function scoreCandidate(el, article) {
+  function scoreCandidate(el) {
     if (!(el instanceof HTMLElement) || !isVisible(el)) return -1;
     if (el.closest(`#${PANEL_ID}`)) return -1;
-    if (el.closest('[role="dialog"]') && !article.closest('[role="dialog"]')) return -1;
     const text = cleanText(el);
     if (text.length < MIN_TEXT_LENGTH) return -1;
     if (el.querySelector('[role="article"]')) return -1;
     if (el.querySelectorAll('img,video').length > 0) return -1;
     if (el.querySelectorAll('button,[role="button"]').length > 4) return -1;
-
-    const rect = el.getBoundingClientRect();
-    if (rect.width < 180 || rect.height < 35) return -1;
-
     let score = text.length;
-    if (el.matches('[data-ad-preview="message"]')) score += 2000;
-    if (el.matches('[data-ad-rendering-role="story_message"]')) score += 2200;
+    if (el.matches('[data-ad-preview="message"]')) score += 2500;
+    if (el.matches('[data-ad-rendering-role="story_message"]')) score += 3000;
     if (el.getAttribute('dir') === 'auto') score += 250;
-    if (el.matches('div')) score += 80;
-    score -= el.querySelectorAll('a').length * 15;
-    score -= el.children.length * 5;
     return score;
   }
 
@@ -299,18 +310,16 @@
     const preferred = [
       '[data-ad-rendering-role="story_message"]',
       '[data-ad-preview="message"]',
-      'div[data-ad-comet-preview="message"]'
+      '[data-ad-comet-preview="message"]'
     ];
     for (const selector of preferred) {
       const el = $(selector, article);
-      if (scoreCandidate(el, article) >= 0) return el;
+      if (scoreCandidate(el) >= 0) return el;
     }
-
-    const pool = $$('div[dir="auto"], span[dir="auto"], div[style*="text-align"]', article);
     let best = null;
     let bestScore = -1;
-    for (const el of pool) {
-      const score = scoreCandidate(el, article);
+    for (const el of $$('div[dir="auto"],span[dir="auto"]', article)) {
+      const score = scoreCandidate(el);
       if (score > bestScore) { best = el; bestScore = score; }
     }
     return best;
@@ -318,32 +327,11 @@
 
   function collapseTarget(el, article) {
     if (!el || el.hasAttribute(TARGET_ATTR)) return false;
-
-    const cs = getComputedStyle(el);
-    const fontSize = parseFloat(cs.fontSize) || 15;
-    const lineHeight = Number.isFinite(parseFloat(cs.lineHeight)) ? parseFloat(cs.lineHeight) : fontSize * 1.35;
-    const maxHeight = Math.ceil(lineHeight * MAX_LINES + 3);
-    const rectHeight = el.getBoundingClientRect().height;
-    const scrollHeight = el.scrollHeight;
-    const fullHeight = Math.max(rectHeight, scrollHeight);
-
-    if (fullHeight <= maxHeight + 8 && cleanText(el).length < 260) return false;
-
-    originalStyles.set(el, {
-      maxHeight: el.style.maxHeight,
-      overflow: el.style.overflow,
-      display: el.style.display,
-      webkitLineClamp: el.style.webkitLineClamp,
-      webkitBoxOrient: el.style.webkitBoxOrient
-    });
-
-    el.setAttribute(TARGET_ATTR, '1');
-    el.style.maxHeight = `${maxHeight}px`;
-    el.style.overflow = 'hidden';
+    if (cleanText(el).length < MIN_TEXT_LENGTH) return false;
+    el.setAttribute(TARGET_ATTR, 'collapsed');
 
     const wrap = document.createElement('div');
     wrap.className = 'vada-fb-expand-wrap';
-    wrap.setAttribute('data-vada-for-article', '1');
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'vada-fb-expand-btn';
@@ -354,46 +342,20 @@
     btn.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      const isCollapsed = el.style.maxHeight !== 'none';
-      if (isCollapsed) {
-        el.style.maxHeight = 'none';
-        el.style.overflow = 'visible';
-        btn.textContent = 'Thu gọn';
-      } else {
-        el.style.maxHeight = `${maxHeight}px`;
-        el.style.overflow = 'hidden';
-        btn.textContent = 'Mở rộng';
-      }
+      const collapsed = el.getAttribute(TARGET_ATTR) === 'collapsed';
+      el.setAttribute(TARGET_ATTR, collapsed ? 'expanded' : 'collapsed');
+      btn.textContent = collapsed ? 'Thu gọn' : 'Mở rộng';
     }, true);
 
-    article.setAttribute(ARTICLE_ATTR, '1');
+    article?.setAttribute(ARTICLE_ATTR, '1');
     return true;
   }
 
   function processArticle(article) {
-    if (!(article instanceof HTMLElement)) return;
-    if (article.closest(`#${PANEL_ID}`)) return;
+    if (!(article instanceof HTMLElement) || article.closest(`#${PANEL_ID}`)) return;
     if (article.hasAttribute(ARTICLE_ATTR) && article.querySelector(`[${TARGET_ATTR}]`)) return;
-
     const target = findPostText(article);
-    if (target && collapseTarget(target, article)) return;
-
-    // Fallback cuối: tìm khối văn bản dài nhất nằm trong nửa trên của bài.
-    const articleRect = article.getBoundingClientRect();
-    let best = null;
-    let bestLen = 0;
-    for (const el of $$('div,span', article)) {
-      if (!isVisible(el) || el.closest('a,button,[role="button"]')) continue;
-      const text = cleanText(el);
-      if (text.length < MIN_TEXT_LENGTH || text.length <= bestLen) continue;
-      if (el.querySelectorAll('img,video,[role="article"]').length) continue;
-      const r = el.getBoundingClientRect();
-      if (r.top > articleRect.top + articleRect.height * 0.62) continue;
-      if (r.width < 180 || r.height < 35) continue;
-      best = el;
-      bestLen = text.length;
-    }
-    if (best) collapseTarget(best, article);
+    if (target) collapseTarget(target, article);
   }
 
   function scanPosts(root = document) {
@@ -401,9 +363,85 @@
     for (const article of articles) processArticle(article);
   }
 
+  function ensureImageHideStyle() {
+    if (!hideImages) {
+      document.getElementById(IMAGE_STYLE_ID)?.remove();
+      $$(`[${MEDIA_BOX_ATTR}]`).forEach(el => el.removeAttribute(MEDIA_BOX_ATTR));
+      return;
+    }
+    let style = document.getElementById(IMAGE_STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = IMAGE_STYLE_ID;
+      document.head.appendChild(style);
+    }
+    style.textContent = `
+      img[data-imgperflogname="feedImage"],
+      img[data-visualcompletion="media-vc-image"]{
+        display:none!important;
+        visibility:hidden!important;
+        width:0!important;
+        height:0!important;
+        min-width:0!important;
+        min-height:0!important;
+        max-width:0!important;
+        max-height:0!important;
+        margin:0!important;
+        padding:0!important;
+      }
+      [${MEDIA_BOX_ATTR}="1"]{display:none!important;height:0!important;min-height:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important}
+    `;
+  }
+
+  function findMediaBox(img) {
+    let node = img;
+    let best = img;
+    for (let i = 0; i < 5; i++) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest(`#${PANEL_ID}`)) break;
+      const text = cleanText(parent);
+      const controls = parent.querySelectorAll('button,input,textarea,[role="button"]').length;
+      const media = parent.querySelectorAll('img,video').length;
+      if (text.length > 10 || controls > 0 || media < 1 || media > 12) break;
+      best = parent;
+      node = parent;
+    }
+    return best;
+  }
+
+  function applyImageHiding(root = document) {
+    ensureImageHideStyle();
+    if (!hideImages) return;
+    const images = [];
+    if (root instanceof HTMLImageElement && root.matches('img[data-imgperflogname="feedImage"],img[data-visualcompletion="media-vc-image"]')) images.push(root);
+    root.querySelectorAll?.('img[data-imgperflogname="feedImage"],img[data-visualcompletion="media-vc-image"]').forEach(img => images.push(img));
+    for (const img of images) {
+      const box = findMediaBox(img);
+      if (box !== img) box.setAttribute(MEDIA_BOX_ATTR, '1');
+    }
+  }
+
+  function updateImageButton() {
+    const btn = $('#vada-fb-hide-images');
+    if (!btn) return;
+    btn.textContent = hideImages ? '🖼 Hiện ảnh bài viết' : '🖼 Ẩn toàn bộ ảnh';
+  }
+
+  function setHideImages(value) {
+    hideImages = !!value;
+    localStorage.setItem(IMAGE_HIDE_KEY, hideImages ? '1' : '0');
+    ensureImageHideStyle();
+    if (hideImages) applyImageHiding(document);
+    updateImageButton();
+    showToast(hideImages ? 'Đã ẩn ảnh bài viết.' : 'Đã hiện lại ảnh bài viết.');
+  }
+
   function scheduleScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => scanPosts(document), 180);
+    scanTimer = setTimeout(() => {
+      scanPosts(document);
+      applyImageHiding(document);
+    }, 160);
   }
 
   function startObserver() {
@@ -414,6 +452,7 @@
           if (!(node instanceof HTMLElement)) continue;
           if (node.matches?.('[role="article"]')) processArticle(node);
           node.querySelectorAll?.('[role="article"]').forEach(processArticle);
+          if (hideImages) applyImageHiding(node);
         }
       }
       scheduleScan();
@@ -423,18 +462,8 @@
 
   function resetCollapsedPosts() {
     $$('.vada-fb-expand-wrap').forEach(el => el.remove());
-    for (const [el, old] of originalStyles.entries()) {
-      if (!el?.isConnected) continue;
-      el.style.maxHeight = old.maxHeight;
-      el.style.overflow = old.overflow;
-      el.style.display = old.display;
-      el.style.webkitLineClamp = old.webkitLineClamp;
-      el.style.webkitBoxOrient = old.webkitBoxOrient;
-      el.removeAttribute(TARGET_ATTR);
-    }
     $$(`[${TARGET_ATTR}]`).forEach(el => el.removeAttribute(TARGET_ATTR));
     $$(`[${ARTICLE_ATTR}]`).forEach(el => el.removeAttribute(ARTICLE_ATTR));
-    originalStyles.clear();
   }
 
   function cleanup() {
@@ -446,8 +475,10 @@
     if (dragUpHandler) window.removeEventListener('pointerup', dragUpHandler, true);
     dragMoveHandler = dragUpHandler = null;
     resetCollapsedPosts();
+    $$(`[${MEDIA_BOX_ATTR}]`).forEach(el => el.removeAttribute(MEDIA_BOX_ATTR));
     document.getElementById(PANEL_ID)?.remove();
     document.getElementById(STYLE_ID)?.remove();
+    document.getElementById(IMAGE_STYLE_ID)?.remove();
     document.getElementById('vada-fb-toast')?.remove();
   }
 
@@ -459,5 +490,6 @@
   addStyles();
   createPanel();
   scanPosts(document);
+  applyImageHiding(document);
   startObserver();
 })();
