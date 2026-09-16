@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🧰 VADA | Auto Workflow | Chọn ngày → Tìm kiếm → Tải file | 12 tháng
 // @namespace    vada.chrome.workflow
-// @version      2.1.3
-// @description  Chọn nhanh ngày, ghi nhớ nút tìm/tải, chạy tự động theo tháng
+// @version      2.2.0
+// @description  Chọn nhanh ngày, ghi nhớ nút tìm/tải, chạy tự động theo tháng, hot-load bản mới không cần F5
 // @match        https://hoadondientu.gdt.gov.vn/*
 // @grant        none
 // @run-at       document-idle
@@ -14,11 +14,16 @@
 (function () {
   'use strict';
 
+  const SCRIPT_VERSION = '2.2.0';
+  const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%A7%B0%20VADA%20-%20Auto%20Workflow%20-%20Ch%E1%BB%8Dn%20ng%C3%A0y%20%E2%80%A2%20T%C3%ACm%20ki%E1%BA%BFm%20%E2%80%A2%20T%E1%BA%A3i%20file%20%E2%80%A2%2012%20th%C3%A1ng.user.js';
+  const INSTANCE_KEY = '__VADA_AUTO_WORKFLOW_INSTANCE__';
   const PANEL_ID='vada-auto-panel', LAUNCHER_ID='vada-auto-launcher';
   const PAGE_KEY='VADA_AUTO_WORKFLOW:'+location.hostname+location.pathname;
   const POS_KEY=PAGE_KEY+':PANEL_POSITION';
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  let running=false, stopRequested=false;
+  let running=false, stopRequested=false, initTimer=null, captureCleanup=null;
+
+  try { window[INSTANCE_KEY]?.destroy?.(); } catch {}
 
   const pad=n=>String(n).padStart(2,'0');
   const isoDate=(y,m,d)=>`${y}-${pad(m)}-${pad(d)}`;
@@ -34,6 +39,24 @@
   const save=()=>localStorage.setItem(PAGE_KEY,JSON.stringify(state));
 
   function status(msg,type='info'){const el=document.querySelector('#vada-status');if(!el)return;el.textContent=msg;el.style.color=({info:'#444',success:'#15803d',warning:'#d97706',error:'#dc2626'})[type]||'#444'}
+
+  async function hotReload(){
+    if(running){status('⏳ Hãy dừng tiến trình trước khi LOAD bản mới','warning');return}
+    status('🔄 Đang tải code mới nhất từ GitHub...','info');
+    try{
+      const res=await fetch(RAW_URL+(RAW_URL.includes('?')?'&':'?')+'_='+Date.now(),{cache:'no-store',credentials:'omit'});
+      if(!res.ok)throw new Error(`HTTP ${res.status}`);
+      const source=await res.text();
+      const m=source.match(/\/\/\s*@version\s+([^\s]+)/);
+      const remoteVersion=m?.[1]||'?';
+      const runtime=source.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\s*/,'');
+      if(!runtime.trim())throw new Error('Không đọc được phần code chạy');
+      status(`⚡ Đang chạy bản ${remoteVersion}...`,'success');
+      setTimeout(()=>{
+        try{new Function(runtime)()}catch(err){console.error(err);alert('VADA LOAD lỗi: '+err.message)}
+      },50);
+    }catch(e){console.error(e);status('❌ LOAD thất bại: '+e.message,'error')}
+  }
 
   function unique(sel){try{return document.querySelectorAll(sel).length===1}catch{return false}}
   function selectorFor(el){
@@ -68,12 +91,14 @@
   const resolveRole=r=>resolve(state.targets[r]);
 
   function capture(role){
+    captureCleanup?.();
     status(`🎯 Bấm vào "${roleNames[role]}" trên trang`,'warning');
     document.body.style.cursor='crosshair';let last=null;
     const move=e=>{if(e.target.closest('#'+PANEL_ID)||e.target.closest('#'+LAUNCHER_ID))return;if(last)last.style.outline=last.dataset.vadaOldOutline||'';const t=normalize(e.target,role);if(!t)return;t.dataset.vadaOldOutline=t.style.outline||'';t.style.outline='3px solid red';last=t};
     const click=e=>{if(e.target.closest('#'+PANEL_ID)||e.target.closest('#'+LAUNCHER_ID))return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();const t=normalize(e.target,role);if(!t)return;state.targets[role]=locator(t,role);save();cleanup();status(`✅ Đã lưu ${roleNames[role]}`,'success');refreshTargets()};
     const key=e=>{if(e.key==='Escape'){cleanup();status('Đã hủy chọn')}};
-    function cleanup(){document.body.style.cursor='';document.removeEventListener('mousemove',move,true);document.removeEventListener('click',click,true);document.removeEventListener('keydown',key,true);if(last)last.style.outline=last.dataset.vadaOldOutline||''}
+    function cleanup(){document.body.style.cursor='';document.removeEventListener('mousemove',move,true);document.removeEventListener('click',click,true);document.removeEventListener('keydown',key,true);if(last)last.style.outline=last.dataset.vadaOldOutline||'';captureCleanup=null}
+    captureCleanup=cleanup;
     document.addEventListener('mousemove',move,true);document.addEventListener('click',click,true);document.addEventListener('keydown',key,true);
   }
 
@@ -112,7 +137,7 @@
   function refreshRun(){for(const [id,en] of [['#vada-run-single',!running],['#vada-run-all',!running],['#vada-stop',running]]){const b=document.querySelector(id);if(b){b.disabled=!en;b.style.opacity=en?'1':'.45'}}}
   function delaySelect(value,vals){const s=document.createElement('select');s.style.cssText='padding:5px;border:1px solid #bbb;border-radius:5px;min-width:75px';for(const ms of vals){const o=document.createElement('option');o.value=ms;o.textContent=ms===0?'0 giây':ms/1000+' giây';o.selected=+value===ms;s.appendChild(o)}return s}
 
-  function showLauncher(){if(document.querySelector('#'+LAUNCHER_ID))return;const b=document.createElement('button');b.id=LAUNCHER_ID;b.textContent='VADA';b.style.cssText='position:fixed;right:15px;bottom:15px;z-index:2147483647;border:0;border-radius:9px;padding:10px 14px;background:#a0520e;color:#fff;font-size:13px;font-weight:bold;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3)';b.onclick=()=>{b.remove();const p=document.querySelector('#'+PANEL_ID);p?p.style.display='block':createPanel();state.hidden=false;save()};document.body.appendChild(b)}
+  function showLauncher(){if(document.querySelector('#'+LAUNCHER_ID))return;const b=document.createElement('button');b.id=LAUNCHER_ID;b.textContent=`VADA v${SCRIPT_VERSION}`;b.style.cssText='position:fixed;right:15px;bottom:15px;z-index:2147483647;border:0;border-radius:9px;padding:10px 14px;background:#a0520e;color:#fff;font-size:13px;font-weight:bold;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3)';b.onclick=()=>{b.remove();const p=document.querySelector('#'+PANEL_ID);p?p.style.display='block':createPanel();state.hidden=false;save()};document.body.appendChild(b)}
   function hidePanel(){const p=document.querySelector('#'+PANEL_ID);if(p)p.style.display='none';state.hidden=true;save();showLauncher()}
   function restorePos(p){try{const x=JSON.parse(localStorage.getItem(POS_KEY)||'null');if(!x||typeof x.left!=='number'||typeof x.top!=='number')return;const ml=Math.max(0,innerWidth-Math.min(p.offsetWidth||460,innerWidth)),mt=Math.max(0,innerHeight-45);p.style.left=Math.min(Math.max(0,x.left),ml)+'px';p.style.top=Math.min(Math.max(0,x.top),mt)+'px';p.style.right='auto';p.style.bottom='auto'}catch{}}
   function draggable(p,h){h.style.cursor='move';h.addEventListener('mousedown',e=>{if(e.button!==0||e.target.tagName==='BUTTON'||e.target.tagName==='SPAN'||e.target.closest('button'))return;e.preventDefault();const r=p.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,sl=r.left,st=r.top;p.style.left=sl+'px';p.style.top=st+'px';p.style.right='auto';p.style.bottom='auto';const move=ev=>{const ml=Math.max(0,innerWidth-p.offsetWidth),mt=Math.max(0,innerHeight-45);p.style.left=Math.min(Math.max(0,sl+ev.clientX-sx),ml)+'px';p.style.top=Math.min(Math.max(0,st+ev.clientY-sy),mt)+'px'};const up=()=>{document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);const q=p.getBoundingClientRect();localStorage.setItem(POS_KEY,JSON.stringify({left:Math.round(q.left),top:Math.round(q.top)}))};document.addEventListener('mousemove',move);document.addEventListener('mouseup',up)})}
@@ -120,7 +145,9 @@
   function createPanel(){
     document.querySelector('#'+PANEL_ID)?.remove();
     const p=document.createElement('div');p.id=PANEL_ID;p.style.cssText='position:fixed;right:16px;bottom:16px;width:460px;max-height:88vh;overflow:auto;padding:13px;background:#fff;border:1px solid #bbb;border-radius:12px;box-shadow:0 6px 28px rgba(0,0,0,.30);z-index:2147483647;font-family:Arial,sans-serif;font-size:13px;color:#222';
-    const h=document.createElement('div');h.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;cursor:move;user-select:none';const title=document.createElement('b');title.textContent='VADA Auto Workflow';const ctl=document.createElement('div');const min=document.createElement('span');min.textContent='−';min.title='Ẩn';min.style.cssText='cursor:pointer;font-size:24px;margin-right:14px;font-weight:bold';min.onclick=e=>{e.stopPropagation();hidePanel()};const close=document.createElement('span');close.textContent='×';close.style.cssText='cursor:pointer;font-size:22px;font-weight:bold';close.onclick=()=>p.remove();ctl.append(min,close);h.append(title,ctl);p.appendChild(h);
+    const h=document.createElement('div');h.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;cursor:move;user-select:none';
+    const titleWrap=document.createElement('div');titleWrap.style.cssText='display:flex;align-items:center;gap:7px';const title=document.createElement('b');title.textContent='VADA Auto Workflow';const ver=document.createElement('span');ver.textContent=`v${SCRIPT_VERSION}`;ver.style.cssText='font-size:11px;padding:2px 6px;border-radius:10px;background:#eef2ff;color:#3730a3;font-weight:700';titleWrap.append(title,ver);
+    const ctl=document.createElement('div');ctl.style.cssText='display:flex;align-items:center';const loadBtn=button('↻ LOAD',hotReload,'#0f766e');loadBtn.title='Tải và chạy code mới nhất từ GitHub, không cần F5';loadBtn.style.padding='5px 8px';const min=document.createElement('span');min.textContent='−';min.title='Ẩn';min.style.cssText='cursor:pointer;font-size:24px;margin:0 12px;font-weight:bold';min.onclick=e=>{e.stopPropagation();hidePanel()};const close=document.createElement('span');close.textContent='×';close.style.cssText='cursor:pointer;font-size:22px;font-weight:bold';close.onclick=()=>p.remove();ctl.append(loadBtn,min,close);h.append(titleWrap,ctl);p.appendChild(h);
 
     const s1=document.createElement('div');s1.style.cssText='border-top:1px solid #ddd;padding-top:9px';s1.innerHTML='<b>1. Chọn thành phần trên trang</b>';const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;margin-top:5px';for(const r of ['date1','date2','search','download']){const b=button('',()=>capture(r));b.id='vada-target-'+r;grid.appendChild(b)}s1.appendChild(grid);s1.append(button('🔍 Kiểm tra',testTargets,'#555'),button('Xóa cấu hình',clearTargets,'#991b1b'));p.appendChild(s1);
 
@@ -136,10 +163,22 @@
 
     const s4=document.createElement('div');s4.style.cssText='border-top:1px solid #ddd;margin-top:8px;padding-top:9px';s4.innerHTML='<b>4. Tải lần lượt tất cả tháng</b>';const yrow=document.createElement('div');yrow.style.cssText='display:flex;align-items:center;gap:7px;margin-top:7px';yrow.append('Năm: ');const yi=document.createElement('input');yi.type='number';yi.id='vada-batch-year';yi.min='2000';yi.max='2100';yi.value=state.batchYear;yi.style.cssText='width:85px;padding:6px;border:1px solid #bbb;border-radius:5px';yrow.appendChild(yi);s4.appendChild(yrow);const ra=button('⬇ Tải đủ 12 tháng',runAll,'#0369a1');ra.id='vada-run-all';const st=button('⏹ Dừng',stop,'#dc2626');st.id='vada-stop';s4.append(ra,st);p.appendChild(s4);
 
-    const stat=document.createElement('div');stat.id='vada-status';stat.textContent='Sẵn sàng';stat.style.cssText='border-top:1px solid #ddd;margin-top:9px;padding-top:8px;font-size:12px;font-weight:600';p.appendChild(stat);const help=document.createElement('div');help.textContent='Bấm nút 🎯 → click trực tiếp thành phần trên website. ESC để hủy chọn.';help.style.cssText='margin-top:4px;color:#777;font-size:11px';p.appendChild(help);
+    const stat=document.createElement('div');stat.id='vada-status';stat.textContent=`Sẵn sàng • v${SCRIPT_VERSION}`;stat.style.cssText='border-top:1px solid #ddd;margin-top:9px;padding-top:8px;font-size:12px;font-weight:600';p.appendChild(stat);const help=document.createElement('div');help.textContent='↻ LOAD = tải code mới nhất từ GitHub và chạy lại ngay trên tab này, không F5. Bấm 🎯 để chọn thành phần; ESC để hủy.';help.style.cssText='margin-top:4px;color:#777;font-size:11px';p.appendChild(help);
     document.body.appendChild(p);restorePos(p);draggable(p,h);refreshTargets();refreshRun();if(state.hidden){p.style.display='none';showLauncher()}
   }
 
-  document.addEventListener('keydown',e=>{if(e.altKey&&e.key.toLowerCase()==='v'){e.preventDefault();const p=document.querySelector('#'+PANEL_ID);if(p&&p.style.display!=='none')hidePanel();else{document.querySelector('#'+LAUNCHER_ID)?.remove();p?p.style.display='block':createPanel();state.hidden=false;save()}}});
-  setTimeout(createPanel,1200);
+  function onGlobalKey(e){if(e.altKey&&e.key.toLowerCase()==='v'){e.preventDefault();const p=document.querySelector('#'+PANEL_ID);if(p&&p.style.display!=='none')hidePanel();else{document.querySelector('#'+LAUNCHER_ID)?.remove();p?p.style.display='block':createPanel();state.hidden=false;save()}}}
+  document.addEventListener('keydown',onGlobalKey);
+
+  function destroy(){
+    stopRequested=true;
+    running=false;
+    captureCleanup?.();
+    if(initTimer)clearTimeout(initTimer);
+    document.removeEventListener('keydown',onGlobalKey);
+    document.querySelector('#'+PANEL_ID)?.remove();
+    document.querySelector('#'+LAUNCHER_ID)?.remove();
+  }
+  window[INSTANCE_KEY]={version:SCRIPT_VERSION,destroy,hotReload};
+  initTimer=setTimeout(createPanel,250);
 })();
