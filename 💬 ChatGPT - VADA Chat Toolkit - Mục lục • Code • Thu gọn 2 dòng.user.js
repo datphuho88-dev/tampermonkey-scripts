@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         💬 ChatGPT - VADA Chat Toolkit - Mục lục • Code • Thu gọn 2 dòng
 // @namespace    https://chatgpt.com/
-// @version      4.2.2
+// @version      4.2.3
 // @description  ChatGPT Toolkit Manual - cực nhẹ, Navigator, Code, thu gọn 2 dòng, LOAD GitHub
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -17,7 +17,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '4.2.2';
+    const VERSION = '4.2.3';
     const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%92%AC%20ChatGPT%20-%20VADA%20Chat%20Toolkit%20-%20M%E1%BB%A5c%20l%E1%BB%A5c%20%E2%80%A2%20Code%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%202%20d%C3%B2ng.user.js';
     const GLOBAL_KEY = '__VADA_CHAT_TOOLKIT__';
 
@@ -149,6 +149,7 @@
     function hotLoad(){
         const button=document.getElementById('vada-load');
         const oldText=button?.textContent||'↻ LOAD';
+        const panelWasOpen=document.getElementById(IDS.panel)?.style.display!=='none';
         if(button){button.disabled=true;button.textContent='… LOAD';}
         toast('Đang tải bản mới từ GitHub...');
         const url=`${RAW_URL}?_=${Date.now()}`;
@@ -162,11 +163,27 @@
                     if(response.status<200||response.status>=300)throw new Error(`HTTP ${response.status}`);
                     const code=response.responseText||'';
                     if(!code.includes('// ==UserScript==')||!code.includes('VADA ChatGPT Toolkit'))throw new Error('Nội dung tải về không hợp lệ');
-                    APP.destroy();
-                    (0,eval)(code);
+                    // Dùng direct eval để code mới vẫn chạy trong sandbox Tampermonkey và dùng được GM_*.
+                    // Không destroy trước: nếu code tải về lỗi cú pháp, panel hiện tại vẫn còn nguyên.
+                    eval(code);
+                    const newPanel=document.getElementById(IDS.panel);
+                    const newToggle=document.getElementById(IDS.toggle);
+                    if(!newPanel&&!newToggle)throw new Error('Bản mới không khởi tạo được giao diện');
+                    if(panelWasOpen&&newPanel){newPanel.style.display='flex';if(newToggle)newToggle.style.display='none';}
                 }catch(error){
                     console.error('[VADA LOAD]',error);
-                    if(button?.isConnected){button.disabled=false;button.textContent=oldText;}
+                    // Nếu bản mới đã dọn instance cũ rồi nhưng khởi tạo thất bại, dựng lại bản đang chạy.
+                    try{window[GLOBAL_KEY]?.destroy?.();}catch(_){}
+                    try{
+                        APP.cleanups.length=0;
+                        window[GLOBAL_KEY]=APP;
+                        init();
+                        if(panelWasOpen)openPanel();
+                    }catch(restoreError){
+                        console.error('[VADA LOAD RESTORE]',restoreError);
+                    }
+                    const restoredButton=document.getElementById('vada-load');
+                    if(restoredButton){restoredButton.disabled=false;restoredButton.textContent=oldText;}
                     toast(`LOAD lỗi: ${error.message}`);
                 }
             },
