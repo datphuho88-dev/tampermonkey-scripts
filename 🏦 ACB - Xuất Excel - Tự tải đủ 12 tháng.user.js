@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🏦 ACB | Xuất Excel | Tự tải đủ 12 tháng
 // @namespace    acb-auto-export
-// @version      1.2.1
-// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ, có dừng, kiểm tra thành phần và hot-load chống cache
+// @version      1.3.0
+// @description  Tự động chọn từng tháng và tải Excel trên ACB ONE BIZ; có chọn ô đăng nhập/mật khẩu, kiểm tra nút tải, dừng và hot-load chống cache
 // @match        https://*.acb.com.vn/*
 // @grant        none
 // @run-at       document-idle
@@ -13,12 +13,14 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = '1.2.1';
+    const SCRIPT_VERSION = '1.3.0';
     const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
     const API_URL = 'https://api.github.com/repos/datphuho88-dev/tampermonkey-scripts/contents/%F0%9F%8F%A6%20ACB%20-%20Xu%E1%BA%A5t%20Excel%20-%20T%E1%BB%B1%20t%E1%BA%A3i%20%C4%91%E1%BB%A7%2012%20th%C3%A1ng.user.js';
     const INSTANCE_KEY = '__ACB_AUTO_EXPORT_INSTANCE__';
     const PANEL_ID = 'acb-auto-export-panel';
     const POS_KEY = 'ACB_AUTO_EXPORT_PANEL_POS';
+    const LOGIN_USER_KEY = 'ACB_AUTO_LOGIN_USER_SELECTOR';
+    const LOGIN_PASS_KEY = 'ACB_AUTO_LOGIN_PASS_SELECTOR';
 
     const DELAY_AFTER_SELECT = 900;
     const DELAY_AFTER_DOWNLOAD = 3000;
@@ -26,6 +28,7 @@
     let running = false;
     let stopRequested = false;
     let initTimer = null;
+    let captureCleanup = null;
 
     try { window[INSTANCE_KEY]?.destroy?.(); } catch {}
 
@@ -37,6 +40,16 @@
         const s = getComputedStyle(el);
         return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
     };
+
+    function isUsable(el) {
+        if (!el || !visible(el)) return false;
+        const s = getComputedStyle(el);
+        return !el.disabled &&
+            el.getAttribute('aria-disabled') !== 'true' &&
+            s.pointerEvents !== 'none' &&
+            s.display !== 'none' &&
+            s.visibility !== 'hidden';
+    }
 
     function setStatus(message, type = 'info') {
         const el = document.querySelector('#acb-auto-status');
@@ -83,6 +96,139 @@
         }
     }
 
+    function cssEscape(value) {
+        if (window.CSS?.escape) return CSS.escape(String(value));
+        return String(value).replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+    }
+
+    function buildSelector(el) {
+        if (!(el instanceof Element)) return null;
+        if (el.id) return '#' + cssEscape(el.id);
+
+        const tag = el.tagName.toLowerCase();
+        const name = el.getAttribute('name');
+        if (name) {
+            const sel = `${tag}[name="${String(name).replace(/"/g, '\\"')}"]`;
+            if (document.querySelectorAll(sel).length === 1) return sel;
+        }
+
+        const type = el.getAttribute('type');
+        if (tag === 'input' && type) {
+            const inputs = [...document.querySelectorAll(`input[type="${cssEscape(type)}"]`)].filter(visible);
+            if (inputs.length === 1) return `input[type="${cssEscape(type)}"]`;
+        }
+
+        const parts = [];
+        let cur = el;
+        for (let depth = 0; cur && cur !== document.body && depth < 5; depth++, cur = cur.parentElement) {
+            let part = cur.tagName.toLowerCase();
+            if (cur.id) {
+                part = '#' + cssEscape(cur.id);
+                parts.unshift(part);
+                break;
+            }
+            const siblings = cur.parentElement ? [...cur.parentElement.children].filter(x => x.tagName === cur.tagName) : [];
+            if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(cur) + 1})`;
+            parts.unshift(part);
+        }
+        return parts.join(' > ');
+    }
+
+    function getSavedTarget(key) {
+        const selector = localStorage.getItem(key);
+        if (!selector) return null;
+        try { return document.querySelector(selector); } catch { return null; }
+    }
+
+    function captureLoginField(kind) {
+        if (captureCleanup) captureCleanup();
+
+        const isUser = kind === 'user';
+        const key = isUser ? LOGIN_USER_KEY : LOGIN_PASS_KEY;
+        const label = isUser ? 'TÊN ĐĂNG NHẬP' : 'MẬT KHẨU';
+
+        setStatus(`Bấm trực tiếp vào ô ${label} trên trang...`, 'warning');
+
+        let hoverEl = null;
+        let oldOutline = '';
+        let oldOffset = '';
+
+        const clearHover = () => {
+            if (!hoverEl) return;
+            hoverEl.style.outline = oldOutline;
+            hoverEl.style.outlineOffset = oldOffset;
+            hoverEl = null;
+        };
+
+        const onMove = e => {
+            const target = e.target.closest?.('input,textarea,[contenteditable="true"]');
+            if (!target || target.closest('#' + PANEL_ID)) return;
+            if (target === hoverEl) return;
+            clearHover();
+            hoverEl = target;
+            oldOutline = target.style.outline;
+            oldOffset = target.style.outlineOffset;
+            target.style.outline = '4px solid #f59e0b';
+            target.style.outlineOffset = '2px';
+        };
+
+        const onClick = e => {
+            const target = e.target.closest?.('input,textarea,[contenteditable="true"]');
+            if (!target || target.closest('#' + PANEL_ID)) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const selector = buildSelector(target);
+            if (!selector) {
+                setStatus(`Không tạo được selector cho ô ${label}`, 'error');
+                cleanup();
+                return;
+            }
+
+            if (!isUser && target instanceof HTMLInputElement && target.type !== 'password') {
+                setStatus('Ô đã chọn không phải input type=password; vẫn đã lưu selector', 'warning');
+            } else {
+                setStatus(`Đã lưu ô ${label}`, 'success');
+            }
+
+            localStorage.setItem(key, selector);
+            flashElement(target, isUser ? '#2563eb' : '#7c3aed', label);
+            cleanup();
+        };
+
+        const onKey = e => {
+            if (e.key === 'Escape') {
+                setStatus('Đã hủy chọn thành phần', 'warning');
+                cleanup();
+            }
+        };
+
+        function cleanup() {
+            clearHover();
+            document.removeEventListener('mousemove', onMove, true);
+            document.removeEventListener('click', onClick, true);
+            document.removeEventListener('keydown', onKey, true);
+            if (captureCleanup === cleanup) captureCleanup = null;
+        }
+
+        captureCleanup = cleanup;
+        setTimeout(() => {
+            document.addEventListener('mousemove', onMove, true);
+            document.addEventListener('click', onClick, true);
+            document.addEventListener('keydown', onKey, true);
+        }, 120);
+    }
+
+    function testSavedLoginFields() {
+        const user = getSavedTarget(LOGIN_USER_KEY);
+        const pass = getSavedTarget(LOGIN_PASS_KEY);
+        let found = 0;
+        if (flashElement(user, '#2563eb', 'TÊN ĐĂNG NHẬP')) found++;
+        if (flashElement(pass, '#7c3aed', 'MẬT KHẨU')) found++;
+        setStatus(`Kiểm tra đăng nhập: tìm thấy ${found}/2`, found === 2 ? 'success' : 'warning');
+    }
+
     function findSelectByLabel(labelText) {
         const wanted = normalizeText(labelText);
         const allElements = document.querySelectorAll('td, div, span, label, p');
@@ -123,7 +269,7 @@
     function findExportButton() {
         const candidates = [...document.querySelectorAll('input[type="button"],input[type="submit"],button,a')]
             .filter(el => {
-                if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+                if (!isUsable(el)) return false;
                 const t = normalizeText(el.innerText || el.value || el.title);
                 return t.includes('xuất excel') || t.includes('xuat excel');
             });
@@ -144,6 +290,18 @@
             el.style.outlineOffset = oldOutlineOffset;
         }, 3000);
         console.log('[ACB AUTO] ' + label, el);
+        return true;
+    }
+
+    function verifyExportButton(showAlert = false) {
+        const btn = findExportButton();
+        if (!btn) {
+            setStatus('Nút XUẤT EXCEL chưa sẵn sàng hoặc đang bị khóa', 'error');
+            if (showAlert) alert('Không tìm thấy nút XUẤT EXCEL đang sẵn sàng để bấm.');
+            return false;
+        }
+        flashElement(btn, '#16a34a', 'XUẤT EXCEL SẴN SÀNG');
+        setStatus('Nút XUẤT EXCEL sẵn sàng', 'success');
         return true;
     }
 
@@ -176,7 +334,7 @@
         const start = Date.now();
         while (Date.now() - start < timeout) {
             const btn = findExportButton();
-            if (btn) return btn;
+            if (btn && isUsable(btn)) return btn;
             await sleep(150);
         }
         return null;
@@ -202,7 +360,7 @@
         const exportButton = findExportButton();
         if (!monthSelect) return alert('Không tìm thấy ô chọn THÁNG.');
         if (!yearSelect) return alert('Không tìm thấy ô chọn NĂM.');
-        if (!exportButton) return alert('Không tìm thấy nút XUẤT EXCEL.');
+        if (!exportButton) return alert('Không tìm thấy nút XUẤT EXCEL đang sẵn sàng.');
 
         const currentYear = [...yearSelect.options].find(o => o.value === yearSelect.value)?.text.trim() || new Date().getFullYear();
         const year = prompt('Nhập năm cần tải đủ 12 tháng:', currentYear);
@@ -226,9 +384,13 @@
                 if (!monthOK) { console.warn('[ACB AUTO] Không chọn được tháng', mm); continue; }
                 await sleep(DELAY_AFTER_SELECT);
                 if (stopRequested) break;
+
                 const btn = await waitForExportButton();
-                if (!btn) throw new Error('Mất nút Xuất Excel tại tháng ' + mm);
+                if (!btn) throw new Error('Nút Xuất Excel chưa sẵn sàng tại tháng ' + mm);
+
+                if (!isUsable(btn)) throw new Error('Nút Xuất Excel bị khóa tại tháng ' + mm);
                 btn.click();
+
                 completed++;
                 await sleep(DELAY_AFTER_DOWNLOAD);
             }
@@ -303,7 +465,7 @@
 
         const panel = document.createElement('div');
         panel.id = PANEL_ID;
-        panel.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;width:285px;padding:10px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 5px 18px rgba(0,0,0,.25);font-family:Arial,sans-serif;color:#111827;user-select:none';
+        panel.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;width:310px;padding:10px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 5px 18px rgba(0,0,0,.25);font-family:Arial,sans-serif;color:#111827;user-select:none';
 
         const head = document.createElement('div');
         head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px';
@@ -313,6 +475,18 @@
         load.title = 'Lấy code mới nhất qua GitHub API và chạy lại ngay';
         head.append(title, load);
 
+        const loginTools = document.createElement('div');
+        loginTools.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px';
+        const pickUser = makeButton('👤 Chọn tên đăng nhập', 'acb-auto-pick-user', '#2563eb', () => captureLoginField('user'));
+        const pickPass = makeButton('🔑 Chọn mật khẩu', 'acb-auto-pick-pass', '#7c3aed', () => captureLoginField('pass'));
+        loginTools.append(pickUser, pickPass);
+
+        const loginCheck = document.createElement('div');
+        loginCheck.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+        const checkLogin = makeButton('🔐 Kiểm tra ô đăng nhập', 'acb-auto-check-login', '#475569', testSavedLoginFields);
+        checkLogin.style.flex = '1';
+        loginCheck.append(checkLogin);
+
         const actions = document.createElement('div');
         actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
         const start = makeButton('⬇ Tải đủ 12 tháng', 'acb-auto-start', '#2868b2', startExport);
@@ -320,10 +494,10 @@
         actions.append(start, stop);
 
         const tools = document.createElement('div');
-        tools.style.cssText = 'display:flex;gap:6px;margin-top:6px';
+        tools.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px';
         const test = makeButton('🔍 Kiểm tra thành phần', 'acb-auto-test', '#4b5563', testElements);
-        test.style.flex = '1';
-        tools.append(test);
+        const checkDownload = makeButton('✅ Kiểm tra nút tải', 'acb-auto-check-download', '#15803d', () => verifyExportButton(true));
+        tools.append(test, checkDownload);
 
         const status = document.createElement('div');
         status.id = 'acb-auto-status';
@@ -331,10 +505,10 @@
         status.style.cssText = 'margin-top:8px;padding-top:7px;border-top:1px solid #e5e7eb;font-size:11px;font-weight:600';
 
         const help = document.createElement('div');
-        help.textContent = 'Kéo phần tiêu đề để di chuyển hộp. LOAD lấy trực tiếp bản mới qua GitHub API để tránh cache Raw.';
+        help.textContent = 'Chọn ô đăng nhập/mật khẩu chỉ lưu vị trí thành phần, không lưu nội dung mật khẩu. Trước mỗi lần tải, script tự kiểm tra lại nút Xuất Excel.';
         help.style.cssText = 'margin-top:5px;font-size:10px;color:#6b7280;line-height:1.35';
 
-        panel.append(head, actions, tools, status, help);
+        panel.append(head, loginTools, loginCheck, actions, tools, status, help);
         document.body.appendChild(panel);
         restorePosition(panel);
         makeDraggable(panel, head);
@@ -344,10 +518,19 @@
     function destroy() {
         stopRequested = true;
         running = false;
+        if (captureCleanup) captureCleanup();
         if (initTimer) clearTimeout(initTimer);
         document.querySelector('#' + PANEL_ID)?.remove();
     }
 
-    window[INSTANCE_KEY] = { version:SCRIPT_VERSION, destroy, hotReload, testElements };
+    window[INSTANCE_KEY] = {
+        version:SCRIPT_VERSION,
+        destroy,
+        hotReload,
+        testElements,
+        testSavedLoginFields,
+        verifyExportButton
+    };
+
     initTimer = setTimeout(createPanel, 300);
 })();
