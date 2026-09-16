@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         🧰 VADA | Auto Workflow | Chọn ngày → Tìm kiếm → Tải file | 12 tháng
 // @namespace    vada.chrome.workflow
-// @version      2.1.2
+// @version      2.1.3
 // @description  Chọn nhanh ngày, ghi nhớ nút tìm/tải, chạy tự động theo tháng
-// @match        *://*/*
+// @match        https://hoadondientu.gdt.gov.vn/*
 // @grant        none
 // @run-at       document-idle
 // @icon         https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/vada-auto-workflow-icon.svg
