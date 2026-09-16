@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.3.1
+// @version      1.3.2
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh duyệt bài, kéo panel và hot reload từ GitHub.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -16,16 +16,16 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.3.1';
+  const VERSION = '1.3.2';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const STORAGE_KEY = 'vada_fb_group_manager_groups_v1';
   const POS_KEY = 'vada_fb_group_manager_position_v1';
   const IMAGE_HIDE_KEY = 'vada_fb_hide_review_images_v1';
   const PANEL_ID = 'vada-fb-group-manager';
   const STYLE_ID = 'vada-fb-group-manager-style';
-  const IMAGE_STYLE_ID = 'vada-fb-image-hide-style';
   const ARTICLE_ATTR = 'data-vada-fb-article-ready';
   const TARGET_ATTR = 'data-vada-fb-collapse-target';
+  const IMAGE_ATTR = 'data-vada-fb-image-hidden';
   const MEDIA_BOX_ATTR = 'data-vada-fb-media-box-hidden';
   const MAX_LINES = 3;
   const MIN_TEXT_LENGTH = 120;
@@ -36,6 +36,10 @@
   let dragMoveHandler = null;
   let dragUpHandler = null;
   let hideImages = loadImageHideState();
+  let hiddenCount = 0;
+
+  const originalImageStyles = new Map();
+  const originalBoxStyles = new Map();
 
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -220,8 +224,8 @@
       if (event.target.closest('#vada-fb-rescan')) {
         resetCollapsedPosts();
         scanPosts();
-        applyImageHiding();
-        return showToast('Đã quét lại bài viết.');
+        applyImageHiding(document, true);
+        return showToast(`Đã quét lại. Ẩn ${hiddenCount} ảnh.`);
       }
       if (event.target.closest('#vada-fb-hide-images')) {
         setHideImages(!hideImages);
@@ -264,6 +268,8 @@
       #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
       [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
       [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
+      [${IMAGE_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;pointer-events:none!important}
+      [${MEDIA_BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;height:0!important;min-height:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important}
       .vada-fb-expand-wrap{margin:4px 0 2px!important;text-align:left!important;position:relative!important;z-index:5!important}
       .vada-fb-expand-btn{appearance:none!important;border:0!important;background:transparent!important;padding:2px 0!important;color:#0866ff!important;cursor:pointer!important;font:700 12px/1.3 Arial,sans-serif!important}
       #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#1c1e21;color:#fff;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
@@ -363,85 +369,159 @@
     for (const article of articles) processArticle(article);
   }
 
-  function ensureImageHideStyle() {
-    if (!hideImages) {
-      document.getElementById(IMAGE_STYLE_ID)?.remove();
-      $$(`[${MEDIA_BOX_ATTR}]`).forEach(el => el.removeAttribute(MEDIA_BOX_ATTR));
-      return;
-    }
-    let style = document.getElementById(IMAGE_STYLE_ID);
-    if (!style) {
-      style = document.createElement('style');
-      style.id = IMAGE_STYLE_ID;
-      document.head.appendChild(style);
-    }
-    style.textContent = `
-      img[data-imgperflogname="feedImage"],
-      img[data-visualcompletion="media-vc-image"]{
-        display:none!important;
-        visibility:hidden!important;
-        width:0!important;
-        height:0!important;
-        min-width:0!important;
-        min-height:0!important;
-        max-width:0!important;
-        max-height:0!important;
-        margin:0!important;
-        padding:0!important;
-      }
-      [${MEDIA_BOX_ATTR}="1"]{display:none!important;height:0!important;min-height:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important}
-    `;
+  function readInlineStyle(el, name) {
+    return { value: el.style.getPropertyValue(name), priority: el.style.getPropertyPriority(name) };
+  }
+
+  function restoreInlineStyle(el, name, state) {
+    if (!state || !state.value) el.style.removeProperty(name);
+    else el.style.setProperty(name, state.value, state.priority || '');
+  }
+
+  function saveImageStyle(img) {
+    if (originalImageStyles.has(img)) return;
+    const props = ['display','visibility','opacity','width','height','min-width','min-height','max-width','max-height','margin','padding','pointer-events'];
+    const state = {};
+    props.forEach(name => { state[name] = readInlineStyle(img, name); });
+    originalImageStyles.set(img, state);
+  }
+
+  function saveBoxStyle(box) {
+    if (originalBoxStyles.has(box)) return;
+    const props = ['display','visibility','height','min-height','max-height','margin','padding','overflow'];
+    const state = {};
+    props.forEach(name => { state[name] = readInlineStyle(box, name); });
+    originalBoxStyles.set(box, state);
+  }
+
+  function isPostImage(img) {
+    if (!(img instanceof HTMLImageElement) || img.closest(`#${PANEL_ID}`)) return false;
+    if (img.matches('img[data-imgperflogname="feedImage"],img[data-visualcompletion="media-vc-image"]')) return true;
+
+    const src = img.currentSrc || img.src || '';
+    if (!src.includes('scontent')) return false;
+    if (!img.closest('main,[role="main"]')) return false;
+
+    const r = img.getBoundingClientRect();
+    const w = Math.max(r.width, img.width || 0, img.naturalWidth || 0);
+    const h = Math.max(r.height, img.height || 0, img.naturalHeight || 0);
+    return w >= 160 && h >= 120;
   }
 
   function findMediaBox(img) {
-    let node = img;
-    let best = img;
-    for (let i = 0; i < 5; i++) {
-      const parent = node.parentElement;
-      if (!parent || parent.closest(`#${PANEL_ID}`)) break;
-      const text = cleanText(parent);
-      const controls = parent.querySelectorAll('button,input,textarea,[role="button"]').length;
-      const media = parent.querySelectorAll('img,video').length;
-      if (text.length > 10 || controls > 0 || media < 1 || media > 12) break;
-      best = parent;
-      node = parent;
+    const article = img.closest('[role="article"]');
+    let node = img.parentElement;
+    let best = null;
+
+    for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+      if (node === article || node.closest(`#${PANEL_ID}`)) break;
+      const text = cleanText(node);
+      const controls = node.querySelectorAll('button,input,textarea,[role="button"]').length;
+      const images = node.querySelectorAll('img').length;
+      const r = node.getBoundingClientRect();
+
+      if (controls > 0 || text.length > 60) break;
+      if (images >= 1 && images <= 20 && r.width >= 140 && r.height >= 80) best = node;
     }
     return best;
   }
 
-  function applyImageHiding(root = document) {
-    ensureImageHideStyle();
-    if (!hideImages) return;
-    const images = [];
-    if (root instanceof HTMLImageElement && root.matches('img[data-imgperflogname="feedImage"],img[data-visualcompletion="media-vc-image"]')) images.push(root);
-    root.querySelectorAll?.('img[data-imgperflogname="feedImage"],img[data-visualcompletion="media-vc-image"]').forEach(img => images.push(img));
-    for (const img of images) {
-      const box = findMediaBox(img);
-      if (box !== img) box.setAttribute(MEDIA_BOX_ATTR, '1');
+  function forceHideImage(img) {
+    if (!isPostImage(img)) return false;
+    saveImageStyle(img);
+    img.setAttribute(IMAGE_ATTR, '1');
+    img.style.setProperty('display', 'none', 'important');
+    img.style.setProperty('visibility', 'hidden', 'important');
+    img.style.setProperty('opacity', '0', 'important');
+    img.style.setProperty('width', '0px', 'important');
+    img.style.setProperty('height', '0px', 'important');
+    img.style.setProperty('min-width', '0px', 'important');
+    img.style.setProperty('min-height', '0px', 'important');
+    img.style.setProperty('max-width', '0px', 'important');
+    img.style.setProperty('max-height', '0px', 'important');
+    img.style.setProperty('margin', '0px', 'important');
+    img.style.setProperty('padding', '0px', 'important');
+    img.style.setProperty('pointer-events', 'none', 'important');
+
+    const box = findMediaBox(img);
+    if (box) {
+      saveBoxStyle(box);
+      box.setAttribute(MEDIA_BOX_ATTR, '1');
+      box.style.setProperty('display', 'none', 'important');
+      box.style.setProperty('visibility', 'hidden', 'important');
+      box.style.setProperty('height', '0px', 'important');
+      box.style.setProperty('min-height', '0px', 'important');
+      box.style.setProperty('max-height', '0px', 'important');
+      box.style.setProperty('margin', '0px', 'important');
+      box.style.setProperty('padding', '0px', 'important');
+      box.style.setProperty('overflow', 'hidden', 'important');
     }
+    return true;
+  }
+
+  function restoreImages() {
+    for (const [img, state] of originalImageStyles.entries()) {
+      if (!img?.isConnected) continue;
+      Object.entries(state).forEach(([name, old]) => restoreInlineStyle(img, name, old));
+      img.removeAttribute(IMAGE_ATTR);
+    }
+    for (const [box, state] of originalBoxStyles.entries()) {
+      if (!box?.isConnected) continue;
+      Object.entries(state).forEach(([name, old]) => restoreInlineStyle(box, name, old));
+      box.removeAttribute(MEDIA_BOX_ATTR);
+    }
+    $$(`[${IMAGE_ATTR}]`).forEach(el => el.removeAttribute(IMAGE_ATTR));
+    $$(`[${MEDIA_BOX_ATTR}]`).forEach(el => el.removeAttribute(MEDIA_BOX_ATTR));
+    originalImageStyles.clear();
+    originalBoxStyles.clear();
+    hiddenCount = 0;
+  }
+
+  function collectImages(root = document) {
+    const result = [];
+    if (root instanceof HTMLImageElement) result.push(root);
+    root.querySelectorAll?.('img').forEach(img => result.push(img));
+    return result;
+  }
+
+  function applyImageHiding(root = document, recount = false) {
+    if (!hideImages) return;
+    if (recount) hiddenCount = 0;
+    let newlyHidden = 0;
+    for (const img of collectImages(root)) {
+      if (img.hasAttribute(IMAGE_ATTR)) continue;
+      if (forceHideImage(img)) newlyHidden++;
+    }
+    if (recount) hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
+    else if (newlyHidden) hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
+    updateImageButton();
   }
 
   function updateImageButton() {
     const btn = $('#vada-fb-hide-images');
     if (!btn) return;
-    btn.textContent = hideImages ? '🖼 Hiện ảnh bài viết' : '🖼 Ẩn toàn bộ ảnh';
+    btn.textContent = hideImages ? `🖼 Hiện ảnh (${hiddenCount} đã ẩn)` : '🖼 Ẩn toàn bộ ảnh';
   }
 
   function setHideImages(value) {
     hideImages = !!value;
     localStorage.setItem(IMAGE_HIDE_KEY, hideImages ? '1' : '0');
-    ensureImageHideStyle();
-    if (hideImages) applyImageHiding(document);
-    updateImageButton();
-    showToast(hideImages ? 'Đã ẩn ảnh bài viết.' : 'Đã hiện lại ảnh bài viết.');
+    if (hideImages) {
+      applyImageHiding(document, true);
+      showToast(`Đã ẩn ${hiddenCount} ảnh.`);
+    } else {
+      restoreImages();
+      updateImageButton();
+      showToast('Đã hiện lại ảnh bài viết.');
+    }
   }
 
   function scheduleScan() {
     clearTimeout(scanTimer);
     scanTimer = setTimeout(() => {
       scanPosts(document);
-      applyImageHiding(document);
-    }, 160);
+      applyImageHiding(document, true);
+    }, 180);
   }
 
   function startObserver() {
@@ -458,6 +538,15 @@
       scheduleScan();
     });
     observer.observe(document.body, { childList: true, subtree: true });
+
+    document.addEventListener('load', event => {
+      if (hideImages && event.target instanceof HTMLImageElement) {
+        if (forceHideImage(event.target)) {
+          hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
+          updateImageButton();
+        }
+      }
+    }, true);
   }
 
   function resetCollapsedPosts() {
@@ -475,10 +564,9 @@
     if (dragUpHandler) window.removeEventListener('pointerup', dragUpHandler, true);
     dragMoveHandler = dragUpHandler = null;
     resetCollapsedPosts();
-    $$(`[${MEDIA_BOX_ATTR}]`).forEach(el => el.removeAttribute(MEDIA_BOX_ATTR));
+    restoreImages();
     document.getElementById(PANEL_ID)?.remove();
     document.getElementById(STYLE_ID)?.remove();
-    document.getElementById(IMAGE_STYLE_ID)?.remove();
     document.getElementById('vada-fb-toast')?.remove();
   }
 
@@ -490,6 +578,6 @@
   addStyles();
   createPanel();
   scanPosts(document);
-  applyImageHiding(document);
+  applyImageHiding(document, true);
   startObserver();
 })();
