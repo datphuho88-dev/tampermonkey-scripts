@@ -1,11 +1,12 @@
 // ==UserScript==
-// @name         VADA - Chrome Auto Workflow
+// @name         🧰 VADA | Auto Workflow | Chọn ngày → Tìm kiếm → Tải file | 12 tháng
 // @namespace    vada.chrome.workflow
-// @version      2.1.1
+// @version      2.1.2
 // @description  Chọn nhanh ngày, ghi nhớ nút tìm/tải, chạy tự động theo tháng
 // @match        *://*/*
 // @grant        none
 // @run-at       document-idle
+// @icon         https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/vada-auto-workflow-icon.svg
 // @updateURL    https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%A7%B0%20VADA%20-%20Auto%20Workflow%20-%20Ch%E1%BB%8Dn%20ng%C3%A0y%20%E2%80%A2%20T%C3%ACm%20ki%E1%BA%BFm%20%E2%80%A2%20T%E1%BA%A3i%20file%20%E2%80%A2%2012%20th%C3%A1ng.user.js
 // @downloadURL  https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%A7%B0%20VADA%20-%20Auto%20Workflow%20-%20Ch%E1%BB%8Dn%20ng%C3%A0y%20%E2%80%A2%20T%C3%ACm%20ki%E1%BA%BFm%20%E2%80%A2%20T%E1%BA%A3i%20file%20%E2%80%A2%2012%20th%C3%A1ng.user.js
 // ==/UserScript==
