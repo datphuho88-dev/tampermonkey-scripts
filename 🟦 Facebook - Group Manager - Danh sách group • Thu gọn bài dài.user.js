@@ -1,193 +1,204 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.3.2
-// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh duyệt bài, kéo panel và hot reload từ GitHub.
+// @version      1.4.0
+// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh duyệt bài, kéo panel và hot reload kiểu ACB.
 // @author       VADA
 // @match        https://www.facebook.com/*
 // @match        https://facebook.com/*
 // @updateURL    https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js
 // @downloadURL  https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js
-// @grant        GM_xmlhttpRequest
-// @connect      raw.githubusercontent.com
+// @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const VERSION = '1.3.2';
-  const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
-  const STORAGE_KEY = 'vada_fb_group_manager_groups_v1';
-  const POS_KEY = 'vada_fb_group_manager_position_v1';
-  const IMAGE_HIDE_KEY = 'vada_fb_hide_review_images_v1';
+  const VERSION = '1.4.0';
+  const API = 'https://api.github.com/repos/datphuho88-dev/tampermonkey-scripts/contents/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
+  const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
   const STYLE_ID = 'vada-fb-group-manager-style';
-  const ARTICLE_ATTR = 'data-vada-fb-article-ready';
+  const GROUP_KEY = 'vada_fb_group_manager_groups_v1';
+  const POS_KEY = 'vada_fb_group_manager_position_v1';
+  const IMAGE_KEY = 'vada_fb_hide_review_images_v1';
   const TARGET_ATTR = 'data-vada-fb-collapse-target';
   const IMAGE_ATTR = 'data-vada-fb-image-hidden';
-  const MEDIA_BOX_ATTR = 'data-vada-fb-media-box-hidden';
+  const BOX_ATTR = 'data-vada-fb-media-box-hidden';
   const MAX_LINES = 3;
-  const MIN_TEXT_LENGTH = 120;
+  const MIN_TEXT = 120;
 
   let observer = null;
   let scanTimer = 0;
+  let imageTimer = 0;
   let toastTimer = 0;
-  let dragMoveHandler = null;
-  let dragUpHandler = null;
-  let hideImages = loadImageHideState();
+  let dragMove = null;
+  let dragUp = null;
+  let hideImages = localStorage.getItem(IMAGE_KEY) !== '0';
   let hiddenCount = 0;
 
-  const originalImageStyles = new Map();
-  const originalBoxStyles = new Map();
-
+  const imageStyles = new Map();
+  const boxStyles = new Map();
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-  function loadGroups() {
+  try { window[INSTANCE_KEY]?.cleanup?.(); } catch (_) {}
+
+  function toast(text) {
+    clearTimeout(toastTimer);
+    document.getElementById('vada-fb-toast')?.remove();
+    const el = document.createElement('div');
+    el.id = 'vada-fb-toast';
+    el.textContent = text;
+    document.body.appendChild(el);
+    toastTimer = setTimeout(() => el.remove(), 2200);
+  }
+
+  function groups() {
     try {
-      const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      const data = JSON.parse(localStorage.getItem(GROUP_KEY) || '[]');
       return Array.isArray(data) ? data : [];
     } catch (_) { return []; }
   }
 
-  function saveGroups(groups) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
+  function saveGroups(data) {
+    localStorage.setItem(GROUP_KEY, JSON.stringify(data));
   }
 
-  function loadImageHideState() {
-    const saved = localStorage.getItem(IMAGE_HIDE_KEY);
-    if (saved === '1') return true;
-    if (saved === '0') return false;
-    return /\/groups\/[^/]+\/(pending_posts|manage|admin_activities|reported|quality)/i.test(location.pathname);
+  function currentGroup() {
+    const m = location.pathname.match(/^\/groups\/([^/?#]+)/i);
+    if (!m) return null;
+    const name = $('h1')?.textContent?.trim() || document.title.replace(/\s*\|\s*Facebook\s*$/i, '').trim() || `Group ${m[1]}`;
+    return { id: m[1], name, url: `${location.origin}/groups/${m[1]}` };
   }
 
-  function normalizeUrl(url) {
-    try {
-      const u = new URL(url, location.origin);
-      u.search = '';
-      u.hash = '';
-      return u.href.replace(/\/$/, '');
-    } catch (_) { return url; }
+  function esc(v) {
+    return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
 
-  function getCurrentGroup() {
-    const match = location.pathname.match(/^\/groups\/([^/?#]+)/i);
-    if (!match) return null;
-    const url = normalizeUrl(`${location.origin}/groups/${match[1]}`);
-    let name = $('h1')?.textContent?.trim() || '';
-    if (!name) name = document.title.replace(/\s*\|\s*Facebook\s*$/i, '').trim();
-    return { name: name || `Group ${match[1]}`, url, id: match[1] };
-  }
-
-  function addCurrentGroup() {
-    const group = getCurrentGroup();
-    if (!group) return showToast('Hãy mở một group Facebook trước.');
-    const groups = loadGroups();
-    const index = groups.findIndex(item => normalizeUrl(item.url) === group.url);
-    if (index >= 0) groups[index] = { ...groups[index], ...group };
-    else groups.unshift(group);
-    saveGroups(groups);
-    renderGroupList();
-    showToast(index >= 0 ? 'Đã cập nhật group.' : 'Đã lưu group.');
-  }
-
-  function removeGroup(url) {
-    const target = normalizeUrl(url);
-    saveGroups(loadGroups().filter(item => normalizeUrl(item.url) !== target));
-    renderGroupList();
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-  }
-
-  function renderGroupList() {
+  function renderGroups() {
     const box = $('#vada-fb-group-list');
     if (!box) return;
-    const groups = loadGroups();
-    if (!groups.length) {
+    const data = groups();
+    if (!data.length) {
       box.innerHTML = '<div class="vada-fb-empty">Chưa lưu group nào.</div>';
       return;
     }
-    box.innerHTML = groups.map((group, index) => `
+    box.innerHTML = data.map((g, i) => `
       <div class="vada-fb-group-row">
-        <button class="vada-fb-group-open" data-url="${escapeHtml(group.url)}" title="Mở group">
-          <span class="vada-fb-group-index">${index + 1}</span>
-          <span class="vada-fb-group-name">${escapeHtml(group.name || group.url)}</span>
-        </button>
-        <button class="vada-fb-group-delete" data-url="${escapeHtml(group.url)}" title="Xóa">×</button>
+        <button class="vada-fb-group-open" data-url="${esc(g.url)}"><span class="vada-fb-group-index">${i + 1}</span><span class="vada-fb-group-name">${esc(g.name || g.url)}</span></button>
+        <button class="vada-fb-group-delete" data-url="${esc(g.url)}" title="Xóa">×</button>
       </div>`).join('');
+  }
+
+  function addCurrentGroup() {
+    const g = currentGroup();
+    if (!g) return toast('Hãy mở một group Facebook trước.');
+    const data = groups();
+    const i = data.findIndex(x => x.id === g.id || x.url === g.url);
+    if (i >= 0) data[i] = g;
+    else data.unshift(g);
+    saveGroups(data);
+    renderGroups();
+    toast(i >= 0 ? 'Đã cập nhật group.' : 'Đã lưu group.');
   }
 
   function loadPosition(panel) {
     try {
-      const pos = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
-      if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return;
-      panel.style.left = `${Math.max(0, Math.min(pos.left, innerWidth - 80))}px`;
-      panel.style.top = `${Math.max(0, Math.min(pos.top, innerHeight - 40))}px`;
+      const p = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+      if (!p || !Number.isFinite(p.left) || !Number.isFinite(p.top)) return;
+      panel.style.left = `${Math.max(0, Math.min(p.left, innerWidth - 80))}px`;
+      panel.style.top = `${Math.max(0, Math.min(p.top, innerHeight - 40))}px`;
       panel.style.right = 'auto';
     } catch (_) {}
   }
 
-  function savePosition(panel) {
-    const r = panel.getBoundingClientRect();
-    localStorage.setItem(POS_KEY, JSON.stringify({ left: Math.round(r.left), top: Math.round(r.top) }));
-  }
-
   function enableDrag(panel) {
-    const header = $('.vada-fb-header', panel);
-    if (!header) return;
-    header.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || event.target.closest('button')) return;
-      event.preventDefault();
+    const head = $('.vada-fb-header', panel);
+    head.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      e.preventDefault();
       const r = panel.getBoundingClientRect();
-      const dx = event.clientX - r.left;
-      const dy = event.clientY - r.top;
+      const dx = e.clientX - r.left;
+      const dy = e.clientY - r.top;
       panel.style.right = 'auto';
-      dragMoveHandler = e => {
-        const left = Math.max(0, Math.min(e.clientX - dx, innerWidth - panel.offsetWidth));
-        const top = Math.max(0, Math.min(e.clientY - dy, innerHeight - 34));
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
+      dragMove = ev => {
+        panel.style.left = `${Math.max(0, Math.min(ev.clientX - dx, innerWidth - panel.offsetWidth))}px`;
+        panel.style.top = `${Math.max(0, Math.min(ev.clientY - dy, innerHeight - 34))}px`;
       };
-      dragUpHandler = () => {
-        savePosition(panel);
-        window.removeEventListener('pointermove', dragMoveHandler, true);
-        window.removeEventListener('pointerup', dragUpHandler, true);
-        dragMoveHandler = dragUpHandler = null;
+      dragUp = () => {
+        const rr = panel.getBoundingClientRect();
+        localStorage.setItem(POS_KEY, JSON.stringify({ left: Math.round(rr.left), top: Math.round(rr.top) }));
+        window.removeEventListener('pointermove', dragMove, true);
+        window.removeEventListener('pointerup', dragUp, true);
+        dragMove = dragUp = null;
       };
-      window.addEventListener('pointermove', dragMoveHandler, true);
-      window.addEventListener('pointerup', dragUpHandler, true);
+      window.addEventListener('pointermove', dragMove, true);
+      window.addEventListener('pointerup', dragUp, true);
     });
   }
 
-  function loadLatest() {
-    const btn = $('#vada-fb-load');
-    if (btn) { btn.disabled = true; btn.textContent = '↻ ...'; }
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: `${RAW_URL}?_=${Date.now()}`,
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-      onload(res) {
-        try {
-          if (res.status < 200 || res.status >= 300 || !res.responseText) throw new Error(`HTTP ${res.status}`);
-          const runner = new Function('GM_xmlhttpRequest', res.responseText);
-          cleanup();
-          runner(GM_xmlhttpRequest);
-        } catch (err) {
-          console.error('[VADA FB] LOAD lỗi:', err);
-          if (btn?.isConnected) { btn.disabled = false; btn.textContent = '↻ LOAD'; }
-          showToast(`LOAD lỗi: ${err.message}`);
-        }
-      },
-      onerror() {
-        if (btn?.isConnected) { btn.disabled = false; btn.textContent = '↻ LOAD'; }
-        showToast('Không tải được code từ GitHub.');
-      }
+  async function latestCode() {
+    const res = await fetch(API + '?ref=main&_=' + Date.now(), {
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { Accept: 'application/vnd.github+json' }
     });
+    if (!res.ok) throw new Error('GitHub API HTTP ' + res.status);
+    const data = await res.json();
+    const b64 = String(data.content || '').replace(/\s/g, '');
+    if (!b64) throw new Error('Không đọc được code GitHub');
+    return new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+  }
+
+  async function hotReload() {
+    const btn = $('#vada-fb-load');
+    if (btn) { btn.disabled = true; btn.textContent = '↻ ĐANG LOAD...'; }
+    toast('Đang lấy code mới nhất từ GitHub...');
+    try {
+      const source = await latestCode();
+      const match = source.match(/\/\/\s*@version\s+([^\s]+)/);
+      const code = source.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\s*/, '');
+      toast(`Đã lấy v${match?.[1] || '?'} • đang chạy...`);
+      setTimeout(() => {
+        try { new Function(code)(); }
+        catch (err) {
+          console.error('[VADA FB] LOAD lỗi:', err);
+          alert('FB LOAD lỗi: ' + err.message);
+        }
+      }, 30);
+    } catch (err) {
+      console.error('[VADA FB] LOAD thất bại:', err);
+      if (btn?.isConnected) { btn.disabled = false; btn.textContent = '↻ LOAD'; }
+      toast('LOAD thất bại: ' + err.message);
+    }
+  }
+
+  function addStyles() {
+    document.getElementById(STYLE_ID)?.remove();
+    const st = document.createElement('style');
+    st.id = STYLE_ID;
+    st.textContent = `
+      #${PANEL_ID}{position:fixed;top:88px;right:14px;z-index:2147483646;width:260px;max-height:calc(100vh - 40px);overflow:hidden;background:#fff;color:#1c1e21;border:1px solid #ccd0d5;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px/1.35 Arial,sans-serif}
+      #${PANEL_ID} *{box-sizing:border-box} #${PANEL_ID} button{font-family:inherit}
+      #${PANEL_ID} .vada-fb-header{height:34px;padding:0 8px 0 10px;display:flex;align-items:center;justify-content:space-between;background:#0866ff;color:#fff;font-weight:700;cursor:move;user-select:none;touch-action:none}
+      #${PANEL_ID} .vada-fb-header-actions{display:flex;align-items:center;gap:6px} #${PANEL_ID} .vada-fb-version{font-size:10px;opacity:.85}
+      #${PANEL_ID} #vada-fb-toggle{width:25px;height:25px;border:0;border-radius:6px;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;font-size:18px}
+      #${PANEL_ID} #vada-fb-panel-body{padding:8px;max-height:calc(100vh - 80px);overflow:auto}
+      #${PANEL_ID} .vada-fb-primary,#${PANEL_ID} .vada-fb-secondary,#${PANEL_ID} .vada-fb-load{width:100%;border:0;border-radius:7px;padding:7px 8px;cursor:pointer;font-weight:700}
+      #${PANEL_ID} .vada-fb-primary{background:#e7f3ff;color:#0866ff} #${PANEL_ID} .vada-fb-secondary{margin-top:6px;background:#f0f2f5;color:#444} #${PANEL_ID} .vada-fb-load{margin-top:6px;background:#0866ff;color:#fff}
+      #${PANEL_ID} .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#65676b}
+      #${PANEL_ID} .vada-fb-group-row{display:flex;gap:4px;margin-bottom:4px} #${PANEL_ID} .vada-fb-group-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #dddfe2;background:#f7f8fa;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#1c1e21}
+      #${PANEL_ID} .vada-fb-group-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e4e6eb;font-size:10px;font-weight:700} #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
+      #${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;background:#fce8e8;color:#c62828;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
+      [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
+      [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
+      [${IMAGE_ATTR}="1"],[${BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;pointer-events:none!important}
+      .vada-fb-expand-wrap{margin:3px 0!important}.vada-fb-expand-btn{border:0!important;background:transparent!important;padding:2px 0!important;color:#0866ff!important;cursor:pointer!important;font:700 12px Arial,sans-serif!important}
+      #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#1c1e21;color:#fff;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
+    `;
+    document.head.appendChild(st);
   }
 
   function createPanel() {
@@ -195,16 +206,11 @@
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
     panel.innerHTML = `
-      <div class="vada-fb-header" title="Giữ và kéo để di chuyển">
-        <span>🟦 FB GROUP</span>
-        <div class="vada-fb-header-actions"><span class="vada-fb-version">v${VERSION}</span><button id="vada-fb-toggle">−</button></div>
-      </div>
+      <div class="vada-fb-header"><span>🟦 FB GROUP</span><div class="vada-fb-header-actions"><span class="vada-fb-version">v${VERSION}</span><button id="vada-fb-toggle">−</button></div></div>
       <div id="vada-fb-panel-body">
         <button id="vada-fb-add-current" class="vada-fb-primary">＋ Lưu group hiện tại</button>
-        <div class="vada-fb-section-title">📌 DANH SÁCH GROUP</div>
-        <div id="vada-fb-group-list"></div>
-        <div class="vada-fb-section-title">📑 ĐỌC NHANH BÀI DÀI</div>
-        <div class="vada-fb-status">Bài dài tự thu gọn còn ${MAX_LINES} dòng.</div>
+        <div class="vada-fb-section-title">📌 DANH SÁCH GROUP</div><div id="vada-fb-group-list"></div>
+        <div class="vada-fb-section-title">📑 ĐỌC NHANH BÀI DÀI</div><div class="vada-fb-status">Bài dài tự thu gọn còn ${MAX_LINES} dòng.</div>
         <button id="vada-fb-rescan" class="vada-fb-secondary">↻ Quét lại bài viết</button>
         <button id="vada-fb-hide-images" class="vada-fb-secondary"></button>
         <button id="vada-fb-load" class="vada-fb-load">↻ LOAD</button>
@@ -212,372 +218,193 @@
     document.body.appendChild(panel);
     loadPosition(panel);
     enableDrag(panel);
-    renderGroupList();
+    renderGroups();
     updateImageButton();
 
-    panel.addEventListener('click', event => {
-      const open = event.target.closest('.vada-fb-group-open');
+    panel.addEventListener('click', e => {
+      const open = e.target.closest('.vada-fb-group-open');
       if (open) return void (location.href = open.dataset.url);
-      const del = event.target.closest('.vada-fb-group-delete');
-      if (del) return removeGroup(del.dataset.url);
-      if (event.target.closest('#vada-fb-add-current')) return addCurrentGroup();
-      if (event.target.closest('#vada-fb-rescan')) {
-        resetCollapsedPosts();
-        scanPosts();
-        applyImageHiding(document, true);
-        return showToast(`Đã quét lại. Ẩn ${hiddenCount} ảnh.`);
+      const del = e.target.closest('.vada-fb-group-delete');
+      if (del) {
+        saveGroups(groups().filter(g => g.url !== del.dataset.url));
+        return renderGroups();
       }
-      if (event.target.closest('#vada-fb-hide-images')) {
-        setHideImages(!hideImages);
-        return;
-      }
-      if (event.target.closest('#vada-fb-load')) return loadLatest();
-      if (event.target.closest('#vada-fb-toggle')) {
+      if (e.target.closest('#vada-fb-add-current')) return addCurrentGroup();
+      if (e.target.closest('#vada-fb-rescan')) { resetCollapsed(); scanPosts(); applyImageHiding(true); return toast(`Đã quét lại • ẩn ${hiddenCount} ảnh.`); }
+      if (e.target.closest('#vada-fb-hide-images')) return setHideImages(!hideImages);
+      if (e.target.closest('#vada-fb-load')) return hotReload();
+      if (e.target.closest('#vada-fb-toggle')) {
         const body = $('#vada-fb-panel-body', panel);
-        const toggle = $('#vada-fb-toggle', panel);
         const hidden = body.style.display === 'none';
         body.style.display = hidden ? '' : 'none';
-        toggle.textContent = hidden ? '−' : '+';
+        $('#vada-fb-toggle', panel).textContent = hidden ? '−' : '+';
       }
     });
   }
 
-  function addStyles() {
-    document.getElementById(STYLE_ID)?.remove();
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-      #${PANEL_ID}{position:fixed;top:88px;right:14px;z-index:2147483646;width:260px;max-height:calc(100vh - 40px);overflow:hidden;background:#fff;color:#1c1e21;border:1px solid #ccd0d5;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.14);font:13px/1.35 Arial,sans-serif}
-      #${PANEL_ID} *{box-sizing:border-box}
-      #${PANEL_ID} .vada-fb-header{height:34px;padding:0 8px 0 10px;display:flex;align-items:center;justify-content:space-between;background:#0866ff;color:#fff;font-weight:700;cursor:move;touch-action:none;user-select:none}
-      #${PANEL_ID} .vada-fb-header-actions{display:flex;align-items:center;gap:6px}
-      #${PANEL_ID} .vada-fb-version{font-size:10px;opacity:.85}
-      #${PANEL_ID} #vada-fb-toggle{width:25px;height:25px;border:0;border-radius:6px;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;font-size:18px}
-      #${PANEL_ID} #vada-fb-panel-body{padding:8px;max-height:calc(100vh - 80px);overflow-y:auto}
-      #${PANEL_ID} button{font-family:inherit}
-      #${PANEL_ID} .vada-fb-primary,#${PANEL_ID} .vada-fb-secondary,#${PANEL_ID} .vada-fb-load{width:100%;border:0;border-radius:7px;padding:7px 8px;cursor:pointer;font-weight:700}
-      #${PANEL_ID} .vada-fb-primary{background:#e7f3ff;color:#0866ff}
-      #${PANEL_ID} .vada-fb-secondary{margin-top:6px;background:#f0f2f5;color:#444}
-      #${PANEL_ID} .vada-fb-load{margin-top:6px;background:#0866ff;color:#fff}
-      #${PANEL_ID} .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#65676b}
-      #${PANEL_ID} .vada-fb-group-row{display:flex;gap:4px;margin-bottom:4px}
-      #${PANEL_ID} .vada-fb-group-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #dddfe2;background:#f7f8fa;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#1c1e21}
-      #${PANEL_ID} .vada-fb-group-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e4e6eb;font-size:10px;font-weight:700}
-      #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
-      #${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;background:#fce8e8;color:#c62828;font-size:18px}
-      #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
-      [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
-      [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
-      [${IMAGE_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;pointer-events:none!important}
-      [${MEDIA_BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;height:0!important;min-height:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important}
-      .vada-fb-expand-wrap{margin:4px 0 2px!important;text-align:left!important;position:relative!important;z-index:5!important}
-      .vada-fb-expand-btn{appearance:none!important;border:0!important;background:transparent!important;padding:2px 0!important;color:#0866ff!important;cursor:pointer!important;font:700 12px/1.3 Arial,sans-serif!important}
-      #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#1c1e21;color:#fff;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
-    `;
-    document.head.appendChild(style);
+  function text(el) { return (el?.innerText || '').replace(/\s+/g, ' ').trim(); }
+
+  function candidate(el) {
+    if (!(el instanceof HTMLElement) || el.closest(`#${PANEL_ID}`) || el.hasAttribute(TARGET_ATTR)) return false;
+    const t = text(el);
+    if (t.length < MIN_TEXT) return false;
+    if (el.querySelectorAll('img,video').length) return false;
+    if (el.querySelectorAll('button,[role="button"]').length > 3) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 180 && r.height > 35;
   }
 
-  function showToast(message) {
-    clearTimeout(toastTimer);
-    document.getElementById('vada-fb-toast')?.remove();
-    const toast = document.createElement('div');
-    toast.id = 'vada-fb-toast';
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    toastTimer = setTimeout(() => toast.remove(), 1800);
-  }
-
-  function cleanText(el) {
-    return (el?.innerText || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function isVisible(el) {
-    if (!(el instanceof HTMLElement)) return false;
-    const s = getComputedStyle(el);
-    return s.display !== 'none' && s.visibility !== 'hidden' && el.getClientRects().length > 0;
-  }
-
-  function scoreCandidate(el) {
-    if (!(el instanceof HTMLElement) || !isVisible(el)) return -1;
-    if (el.closest(`#${PANEL_ID}`)) return -1;
-    const text = cleanText(el);
-    if (text.length < MIN_TEXT_LENGTH) return -1;
-    if (el.querySelector('[role="article"]')) return -1;
-    if (el.querySelectorAll('img,video').length > 0) return -1;
-    if (el.querySelectorAll('button,[role="button"]').length > 4) return -1;
-    let score = text.length;
-    if (el.matches('[data-ad-preview="message"]')) score += 2500;
-    if (el.matches('[data-ad-rendering-role="story_message"]')) score += 3000;
-    if (el.getAttribute('dir') === 'auto') score += 250;
-    return score;
-  }
-
-  function findPostText(article) {
-    const preferred = [
-      '[data-ad-rendering-role="story_message"]',
-      '[data-ad-preview="message"]',
-      '[data-ad-comet-preview="message"]'
-    ];
-    for (const selector of preferred) {
-      const el = $(selector, article);
-      if (scoreCandidate(el) >= 0) return el;
-    }
-    let best = null;
-    let bestScore = -1;
-    for (const el of $$('div[dir="auto"],span[dir="auto"]', article)) {
-      const score = scoreCandidate(el);
-      if (score > bestScore) { best = el; bestScore = score; }
-    }
-    return best;
-  }
-
-  function collapseTarget(el, article) {
-    if (!el || el.hasAttribute(TARGET_ATTR)) return false;
-    if (cleanText(el).length < MIN_TEXT_LENGTH) return false;
+  function collapse(el) {
+    if (!candidate(el)) return false;
     el.setAttribute(TARGET_ATTR, 'collapsed');
-
     const wrap = document.createElement('div');
     wrap.className = 'vada-fb-expand-wrap';
     const btn = document.createElement('button');
-    btn.type = 'button';
     btn.className = 'vada-fb-expand-btn';
+    btn.type = 'button';
     btn.textContent = 'Mở rộng';
     wrap.appendChild(btn);
     el.insertAdjacentElement('afterend', wrap);
-
-    btn.addEventListener('click', e => {
-      e.preventDefault();
-      e.stopPropagation();
+    btn.addEventListener('click', ev => {
+      ev.preventDefault(); ev.stopPropagation();
       const collapsed = el.getAttribute(TARGET_ATTR) === 'collapsed';
       el.setAttribute(TARGET_ATTR, collapsed ? 'expanded' : 'collapsed');
       btn.textContent = collapsed ? 'Thu gọn' : 'Mở rộng';
     }, true);
-
-    article?.setAttribute(ARTICLE_ATTR, '1');
     return true;
   }
 
-  function processArticle(article) {
-    if (!(article instanceof HTMLElement) || article.closest(`#${PANEL_ID}`)) return;
-    if (article.hasAttribute(ARTICLE_ATTR) && article.querySelector(`[${TARGET_ATTR}]`)) return;
-    const target = findPostText(article);
-    if (target) collapseTarget(target, article);
-  }
-
   function scanPosts(root = document) {
-    const articles = root.matches?.('[role="article"]') ? [root] : $$('[role="article"]', root);
-    for (const article of articles) processArticle(article);
+    const preferred = $$('[data-ad-rendering-role="story_message"],[data-ad-preview="message"],[data-ad-comet-preview="message"]', root);
+    preferred.forEach(collapse);
+    const articles = $$('[role="article"]', root);
+    for (const article of articles) {
+      if (article.querySelector(`[${TARGET_ATTR}]`)) continue;
+      let best = null;
+      for (const el of $$('div[dir="auto"],span[dir="auto"]', article)) {
+        if (!candidate(el)) continue;
+        if (!best || text(el).length > text(best).length) best = el;
+      }
+      if (best) collapse(best);
+    }
   }
 
-  function readInlineStyle(el, name) {
-    return { value: el.style.getPropertyValue(name), priority: el.style.getPropertyPriority(name) };
-  }
-
-  function restoreInlineStyle(el, name, state) {
-    if (!state || !state.value) el.style.removeProperty(name);
-    else el.style.setProperty(name, state.value, state.priority || '');
-  }
-
-  function saveImageStyle(img) {
-    if (originalImageStyles.has(img)) return;
-    const props = ['display','visibility','opacity','width','height','min-width','min-height','max-width','max-height','margin','padding','pointer-events'];
+  function saveStyle(map, el, props) {
+    if (map.has(el)) return;
     const state = {};
-    props.forEach(name => { state[name] = readInlineStyle(img, name); });
-    originalImageStyles.set(img, state);
+    for (const p of props) state[p] = [el.style.getPropertyValue(p), el.style.getPropertyPriority(p)];
+    map.set(el, state);
   }
 
-  function saveBoxStyle(box) {
-    if (originalBoxStyles.has(box)) return;
-    const props = ['display','visibility','height','min-height','max-height','margin','padding','overflow'];
-    const state = {};
-    props.forEach(name => { state[name] = readInlineStyle(box, name); });
-    originalBoxStyles.set(box, state);
+  function restoreStyle(map, attr) {
+    for (const [el, state] of map) {
+      if (!el?.isConnected) continue;
+      for (const [p, [v, pri]] of Object.entries(state)) v ? el.style.setProperty(p, v, pri) : el.style.removeProperty(p);
+      el.removeAttribute(attr);
+    }
+    map.clear();
   }
 
   function isPostImage(img) {
     if (!(img instanceof HTMLImageElement) || img.closest(`#${PANEL_ID}`)) return false;
     if (img.matches('img[data-imgperflogname="feedImage"],img[data-visualcompletion="media-vc-image"]')) return true;
-
     const src = img.currentSrc || img.src || '';
-    if (!src.includes('scontent')) return false;
-    if (!img.closest('main,[role="main"]')) return false;
-
+    if (!src.includes('scontent') || !img.closest('main,[role="main"]')) return false;
     const r = img.getBoundingClientRect();
-    const w = Math.max(r.width, img.width || 0, img.naturalWidth || 0);
-    const h = Math.max(r.height, img.height || 0, img.naturalHeight || 0);
-    return w >= 160 && h >= 120;
+    return Math.max(r.width, img.width || 0, img.naturalWidth || 0) >= 180 && Math.max(r.height, img.height || 0, img.naturalHeight || 0) >= 120;
   }
 
-  function findMediaBox(img) {
+  function mediaBox(img) {
     const article = img.closest('[role="article"]');
-    let node = img.parentElement;
-    let best = null;
-
-    for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
-      if (node === article || node.closest(`#${PANEL_ID}`)) break;
-      const text = cleanText(node);
-      const controls = node.querySelectorAll('button,input,textarea,[role="button"]').length;
-      const images = node.querySelectorAll('img').length;
+    let node = img.parentElement, best = null;
+    for (let i = 0; i < 7 && node && node !== article; i++, node = node.parentElement) {
+      if (node.closest(`#${PANEL_ID}`)) break;
+      if (node.querySelectorAll('button,input,textarea,[role="button"]').length) break;
+      if (text(node).length > 40) break;
       const r = node.getBoundingClientRect();
-
-      if (controls > 0 || text.length > 60) break;
-      if (images >= 1 && images <= 20 && r.width >= 140 && r.height >= 80) best = node;
+      if (node.querySelectorAll('img').length <= 20 && r.width >= 140 && r.height >= 80) best = node;
     }
     return best;
   }
 
-  function forceHideImage(img) {
+  function hideImage(img) {
     if (!isPostImage(img)) return false;
-    saveImageStyle(img);
+    saveStyle(imageStyles, img, ['display','visibility','opacity','width','height','min-width','min-height','max-width','max-height','margin','padding','pointer-events']);
     img.setAttribute(IMAGE_ATTR, '1');
-    img.style.setProperty('display', 'none', 'important');
-    img.style.setProperty('visibility', 'hidden', 'important');
-    img.style.setProperty('opacity', '0', 'important');
-    img.style.setProperty('width', '0px', 'important');
-    img.style.setProperty('height', '0px', 'important');
-    img.style.setProperty('min-width', '0px', 'important');
-    img.style.setProperty('min-height', '0px', 'important');
-    img.style.setProperty('max-width', '0px', 'important');
-    img.style.setProperty('max-height', '0px', 'important');
-    img.style.setProperty('margin', '0px', 'important');
-    img.style.setProperty('padding', '0px', 'important');
-    img.style.setProperty('pointer-events', 'none', 'important');
-
-    const box = findMediaBox(img);
+    for (const [p, v] of Object.entries({display:'none',visibility:'hidden',opacity:'0',width:'0px',height:'0px','min-width':'0px','min-height':'0px','max-width':'0px','max-height':'0px',margin:'0px',padding:'0px','pointer-events':'none'})) img.style.setProperty(p, v, 'important');
+    const box = mediaBox(img);
     if (box) {
-      saveBoxStyle(box);
-      box.setAttribute(MEDIA_BOX_ATTR, '1');
-      box.style.setProperty('display', 'none', 'important');
-      box.style.setProperty('visibility', 'hidden', 'important');
-      box.style.setProperty('height', '0px', 'important');
-      box.style.setProperty('min-height', '0px', 'important');
-      box.style.setProperty('max-height', '0px', 'important');
-      box.style.setProperty('margin', '0px', 'important');
-      box.style.setProperty('padding', '0px', 'important');
-      box.style.setProperty('overflow', 'hidden', 'important');
+      saveStyle(boxStyles, box, ['display','visibility','height','min-height','max-height','margin','padding','overflow']);
+      box.setAttribute(BOX_ATTR, '1');
+      for (const [p, v] of Object.entries({display:'none',visibility:'hidden',height:'0px','min-height':'0px','max-height':'0px',margin:'0px',padding:'0px',overflow:'hidden'})) box.style.setProperty(p, v, 'important');
     }
     return true;
   }
 
-  function restoreImages() {
-    for (const [img, state] of originalImageStyles.entries()) {
-      if (!img?.isConnected) continue;
-      Object.entries(state).forEach(([name, old]) => restoreInlineStyle(img, name, old));
-      img.removeAttribute(IMAGE_ATTR);
-    }
-    for (const [box, state] of originalBoxStyles.entries()) {
-      if (!box?.isConnected) continue;
-      Object.entries(state).forEach(([name, old]) => restoreInlineStyle(box, name, old));
-      box.removeAttribute(MEDIA_BOX_ATTR);
-    }
-    $$(`[${IMAGE_ATTR}]`).forEach(el => el.removeAttribute(IMAGE_ATTR));
-    $$(`[${MEDIA_BOX_ATTR}]`).forEach(el => el.removeAttribute(MEDIA_BOX_ATTR));
-    originalImageStyles.clear();
-    originalBoxStyles.clear();
-    hiddenCount = 0;
-  }
-
-  function collectImages(root = document) {
-    const result = [];
-    if (root instanceof HTMLImageElement) result.push(root);
-    root.querySelectorAll?.('img').forEach(img => result.push(img));
-    return result;
-  }
-
-  function applyImageHiding(root = document, recount = false) {
+  function applyImageHiding(recount = false, root = document) {
     if (!hideImages) return;
-    if (recount) hiddenCount = 0;
-    let newlyHidden = 0;
-    for (const img of collectImages(root)) {
-      if (img.hasAttribute(IMAGE_ATTR)) continue;
-      if (forceHideImage(img)) newlyHidden++;
-    }
+    if (root instanceof HTMLImageElement && !root.hasAttribute(IMAGE_ATTR)) hideImage(root);
+    root.querySelectorAll?.('img').forEach(img => { if (!img.hasAttribute(IMAGE_ATTR)) hideImage(img); });
     if (recount) hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
-    else if (newlyHidden) hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
+    else hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
     updateImageButton();
+  }
+
+  function restoreImages() {
+    restoreStyle(imageStyles, IMAGE_ATTR);
+    restoreStyle(boxStyles, BOX_ATTR);
+    $$(`[${IMAGE_ATTR}]`).forEach(el => el.removeAttribute(IMAGE_ATTR));
+    $$(`[${BOX_ATTR}]`).forEach(el => el.removeAttribute(BOX_ATTR));
+    hiddenCount = 0;
   }
 
   function updateImageButton() {
     const btn = $('#vada-fb-hide-images');
-    if (!btn) return;
-    btn.textContent = hideImages ? `🖼 Hiện ảnh (${hiddenCount} đã ẩn)` : '🖼 Ẩn toàn bộ ảnh';
+    if (btn) btn.textContent = hideImages ? `🖼 Hiện ảnh (${hiddenCount} đã ẩn)` : '🖼 Ẩn toàn bộ ảnh';
   }
 
-  function setHideImages(value) {
-    hideImages = !!value;
-    localStorage.setItem(IMAGE_HIDE_KEY, hideImages ? '1' : '0');
-    if (hideImages) {
-      applyImageHiding(document, true);
-      showToast(`Đã ẩn ${hiddenCount} ảnh.`);
-    } else {
-      restoreImages();
-      updateImageButton();
-      showToast('Đã hiện lại ảnh bài viết.');
-    }
+  function setHideImages(v) {
+    hideImages = !!v;
+    localStorage.setItem(IMAGE_KEY, hideImages ? '1' : '0');
+    if (hideImages) { applyImageHiding(true); toast(`Đã ẩn ${hiddenCount} ảnh.`); }
+    else { restoreImages(); updateImageButton(); toast('Đã hiện lại ảnh.'); }
   }
 
   function scheduleScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => {
-      scanPosts(document);
-      applyImageHiding(document, true);
-    }, 180);
+    scanTimer = setTimeout(() => { scanPosts(); applyImageHiding(true); }, 180);
   }
 
   function startObserver() {
     observer?.disconnect();
-    observer = new MutationObserver(mutations => {
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          if (!(node instanceof HTMLElement)) continue;
-          if (node.matches?.('[role="article"]')) processArticle(node);
-          node.querySelectorAll?.('[role="article"]').forEach(processArticle);
-          if (hideImages) applyImageHiding(node);
-        }
-      }
-      scheduleScan();
-    });
+    observer = new MutationObserver(() => scheduleScan());
     observer.observe(document.body, { childList: true, subtree: true });
-
-    document.addEventListener('load', event => {
-      if (hideImages && event.target instanceof HTMLImageElement) {
-        if (forceHideImage(event.target)) {
-          hiddenCount = document.querySelectorAll(`img[${IMAGE_ATTR}]`).length;
-          updateImageButton();
-        }
-      }
-    }, true);
+    imageTimer = setInterval(() => { if (hideImages) applyImageHiding(true); }, 900);
   }
 
-  function resetCollapsedPosts() {
+  function resetCollapsed() {
     $$('.vada-fb-expand-wrap').forEach(el => el.remove());
     $$(`[${TARGET_ATTR}]`).forEach(el => el.removeAttribute(TARGET_ATTR));
-    $$(`[${ARTICLE_ATTR}]`).forEach(el => el.removeAttribute(ARTICLE_ATTR));
   }
 
   function cleanup() {
-    observer?.disconnect();
-    observer = null;
-    clearTimeout(scanTimer);
-    clearTimeout(toastTimer);
-    if (dragMoveHandler) window.removeEventListener('pointermove', dragMoveHandler, true);
-    if (dragUpHandler) window.removeEventListener('pointerup', dragUpHandler, true);
-    dragMoveHandler = dragUpHandler = null;
-    resetCollapsedPosts();
+    observer?.disconnect(); observer = null;
+    clearTimeout(scanTimer); clearTimeout(toastTimer); clearInterval(imageTimer);
+    if (dragMove) window.removeEventListener('pointermove', dragMove, true);
+    if (dragUp) window.removeEventListener('pointerup', dragUp, true);
+    dragMove = dragUp = null;
+    resetCollapsed();
     restoreImages();
     document.getElementById(PANEL_ID)?.remove();
     document.getElementById(STYLE_ID)?.remove();
     document.getElementById('vada-fb-toast')?.remove();
   }
 
-  if (window.__VADA_FB_GROUP_MANAGER__?.cleanup) {
-    try { window.__VADA_FB_GROUP_MANAGER__.cleanup(); } catch (_) {}
-  }
-  window.__VADA_FB_GROUP_MANAGER__ = { version: VERSION, cleanup };
+  window[INSTANCE_KEY] = { version: VERSION, cleanup };
 
   addStyles();
   createPanel();
-  scanPosts(document);
-  applyImageHiding(document, true);
+  scanPosts();
+  applyImageHiding(true);
   startObserver();
 })();
