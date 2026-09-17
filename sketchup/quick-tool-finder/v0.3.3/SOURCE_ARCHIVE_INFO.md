@@ -1,0 +1,1 @@
+Bản cài `tim_cong_cu_nhanh_v0.3.3.rbz` là một ZIP chuẩn SketchUp chứa toàn bộ source chạy thực tế. Source gồm loader Ruby, `main.rb`, `ui.html` và icon. File local đã được kiểm tra `ruby -c` và `zip.testzip()` trước khi bàn giao.
