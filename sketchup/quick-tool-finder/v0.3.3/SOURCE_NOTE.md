@@ -1,0 +1,1 @@
+Source code của bản v0.3.3 nằm trực tiếp trong file RBZ (RBZ là ZIP chuẩn của SketchUp). Mã chính gồm `quick_tool_finder.rb`, `quick_tool_finder/main.rb`, `quick_tool_finder/ui.html` và thư mục icon. Bản này chỉ sửa cơ chế lưu/khôi phục công cụ đã ghim, không đổi chức năng khác.
