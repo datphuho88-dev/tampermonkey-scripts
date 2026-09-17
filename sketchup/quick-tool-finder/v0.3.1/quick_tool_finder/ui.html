@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quick Tool Finder v0.3.1</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --panel-2: #f8fafc;
+    --text: #172033;
+    --muted: #758096;
+    --line: #e2e7ef;
+    --accent: #2563eb;
+    --accent-soft: rgba(37,99,235,.10);
+    --accent-line: rgba(37,99,235,.28);
+    --success: #16835c;
+    --shadow: 0 8px 26px rgba(24,34,55,.08);
+    --radius: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181e;
+      --panel: #1d2129;
+      --panel-2: #242932;
+      --text: #eef2f7;
+      --muted: #98a2b3;
+      --line: #343b47;
+      --accent: #69a2ff;
+      --accent-soft: rgba(105,162,255,.12);
+      --accent-line: rgba(105,162,255,.30);
+      --success: #55c99a;
+      --shadow: 0 10px 28px rgba(0,0,0,.22);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+  }
+  button, input { font: inherit; }
+  button { color: inherit; }
+
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    background: var(--bg);
+  }
+
+  .header {
+    padding: 14px 14px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 1px 0 rgba(0,0,0,.02);
+    z-index: 2;
+  }
+
+  .brand-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 11px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .brand-icon {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .brand-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 700; line-height: 1;
+  }
+  .version {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .2px;
+  }
+  .brand-sub { margin-top: 4px; color: var(--muted); font-size: 11px; }
+
+  .top-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .tool-btn {
+    height: 32px;
+    min-width: 32px;
+    padding: 0 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--panel-2);
+    cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, transform .08s ease;
+  }
+  .tool-btn:hover { background: var(--accent-soft); border-color: var(--accent-line); }
+  .tool-btn:active { transform: translateY(1px); }
+  .tool-btn .label { font-size: 11px; font-weight: 600; }
+
+  .search-wrap {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .search-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 42px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: var(--panel-2);
+    transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
+  }
+  .search-box:focus-within {
+    border-color: var(--accent);
+    background: var(--panel);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .search-icon { width: 38px; text-align: center; color: var(--muted); font-size: 15px; }
+  #q {
+    min-width: 0;
+    flex: 1;
+    height: 100%;
+    padding: 0 4px 0 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 15px;
+  }
+  #q::placeholder { color: var(--muted); }
+  .clear-btn {
+    width: 30px; height: 30px;
+    margin-right: 5px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    visibility: hidden;
+  }
+  .clear-btn.visible { visibility: visible; }
+  .clear-btn:hover { background: var(--accent-soft); color: var(--text); }
+  .refresh-btn { width: 42px; height: 42px; padding: 0; font-size: 17px; }
+  .refresh-btn.spin { animation: spin .75s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 9px;
+    min-height: 27px;
+  }
+  .chip {
+    height: 27px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .12s ease;
+  }
+  .chip:hover { border-color: var(--accent-line); color: var(--text); }
+  .chip.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+  .hint { margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
+
+  .list {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 9px 10px 14px;
+    scroll-behavior: smooth;
+  }
+  .list::-webkit-scrollbar { width: 9px; }
+  .list::-webkit-scrollbar-thumb { background: rgba(120,130,145,.28); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+
+  .item {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 58px;
+    margin-bottom: 5px;
+    padding: 8px 9px 8px 11px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    cursor: pointer;
+    transition: background .10s ease, border-color .10s ease, box-shadow .10s ease;
+  }
+  .item:hover { background: var(--panel); border-color: var(--line); }
+  .item.active {
+    background: var(--panel);
+    border-color: var(--accent-line);
+    box-shadow: var(--shadow);
+  }
+  .item.pinned { border-left: 3px solid var(--accent); padding-left: 9px; }
+  .content { min-width: 0; }
+  .title-line { display: flex; align-items: center; min-width: 0; gap: 7px; }
+  .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 1.3;
+  }
+  .alias {
+    max-width: 42%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .badge {
+    flex-shrink: 0;
+    height: 19px;
+    padding: 0 6px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    background: var(--panel-2);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .15px;
+  }
+  .badge.pin { color: var(--success); }
+  .shortcut {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 700;
+    background: var(--panel-2);
+  }
+  .meta {
+    margin-top: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 10px;
+  }
+
+  .actions { display: flex; gap: 5px; opacity: .72; transition: opacity .1s ease; }
+  .item:hover .actions, .item.active .actions { opacity: 1; }
+  .mini {
+    height: 30px;
+    min-width: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    transition: background .1s ease, border-color .1s ease, transform .08s ease;
+  }
+  .mini:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-line); }
+  .mini:active:not(:disabled) { transform: translateY(1px); }
+  .mini:disabled { opacity: .45; cursor: default; }
+  .mini.pin-btn:not(:disabled) { color: var(--accent); }
+
+  .empty {
+    min-height: 220px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty-icon { font-size: 28px; opacity: .6; margin-bottom: 8px; }
+  .empty-title { font-size: 13px; font-weight: 700; color: var(--text); }
+  .empty-sub { margin-top: 5px; font-size: 11px; }
+
+  .footer {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 14px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: inline-block; margin-right: 6px;
+  }
+
+  @media (max-width: 760px) {
+    .tool-btn .label, .hint { display: none; }
+    .brand-sub { display: none; }
+    .actions .shortcut-btn { display: none; }
+  }
+  @media (max-width: 620px) {
+    .top-actions #finderShortcut, .top-actions #showQuickTools { display: none; }
+    .item { grid-template-columns: minmax(0,1fr) auto; }
+    .actions .alias-btn { display: none; }
+    .alias { max-width: 50%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="brand-row">
+      <div class="brand">
+        <div class="brand-icon">⌕</div>
+        <div>
+          <div class="brand-title">Quick Tool Finder <span class="version">v0.3.1</span></div>
+          <div class="brand-sub">Tìm, đặt tên, ghim và chạy nhanh công cụ SketchUp</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="tool-btn" id="finderShortcut" title="Đặt phím tắt mở Quick Tool Finder"><span>⌨</span><span class="label">Finder</span></button>
+        <button class="tool-btn" id="showQuickTools" title="Hiện thanh Quick Tools đã ghim"><span>📌</span><span class="label">Quick Tools</span></button>
+        <button class="tool-btn" id="showToolbar" title="Hiện icon Quick Tool Finder trên màn hình"><span>▣</span></button>
+      </div>
+    </div>
+
+    <div class="search-wrap">
+      <div class="search-box">
+        <div class="search-icon">⌕</div>
+        <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Tìm công cụ… ví dụ: make box hoặc hình vuông">
+        <button class="clear-btn" id="clear" title="Xóa tìm kiếm">×</button>
+      </div>
+      <button class="tool-btn refresh-btn" id="refresh" title="Quét lại công cụ">↻</button>
+    </div>
+
+    <div class="filter-row">
+      <button class="chip active" data-filter="all">Tất cả</button>
+      <button class="chip" data-filter="pinned">📌 Đã ghim</button>
+      <button class="chip" data-filter="alias">✎ Tên gợi nhớ</button>
+      <div class="hint">↑ ↓ chọn · Enter chạy · Esc đóng</div>
+    </div>
+  </header>
+
+  <main id="list" class="list"></main>
+
+  <footer class="footer">
+    <span><span class="status-dot"></span><span id="count">0 công cụ</span></span>
+    <span>Nhấn 📌 để đưa công cụ ra thanh Quick Tools</span>
+  </footer>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  let commands = [];
+  let filtered = [];
+  let activeIndex = 0;
+  let filterMode = 'all';
+  let inputTimer = 0;
+  let renderFrame = 0;
+
+  const q = document.getElementById('q');
+  const list = document.getElementById('list');
+  const count = document.getElementById('count');
+  const clearBtn = document.getElementById('clear');
+  const refreshBtn = document.getElementById('refresh');
+  const chips = Array.from(document.querySelectorAll('.chip'));
+
+  function normalize(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function prepare(c) {
+    c._alias = normalize(c.alias);
+    c._name = normalize(c.name);
+    c._search = normalize([c.alias, c.name, c.tooltip, c.status, c.extension, c.source, c.toolbar].join(' '));
+    return c;
+  }
+
+  function score(c, query) {
+    const pinBoost = c.pinned ? 30 : 0;
+    if (!query) return (c.alias ? 20 : 0) + pinBoost;
+    const alias = c._alias;
+    const name = c._name;
+    const all = c._search;
+    if (alias && alias === query) return 1300 + pinBoost;
+    if (alias && alias.startsWith(query)) return 1150 - alias.length + pinBoost;
+    if (alias && alias.indexOf(query) >= 0) return 1050 - alias.indexOf(query) + pinBoost;
+    if (name === query) return 1000 + pinBoost;
+    if (name.startsWith(query)) return 850 - name.length + pinBoost;
+    const words = name.split(/\s+/);
+    for (let i = 0; i < words.length; i++) {
+      if (words[i].startsWith(query)) return 700 - i + pinBoost;
+    }
+    const pos = name.indexOf(query);
+    if (pos >= 0) return 600 - pos + pinBoost;
+    const allPos = all.indexOf(query);
+    if (allPos >= 0) return 400 - allPos + pinBoost;
+
+    let qi = 0;
+    let gap = 0;
+    for (let i = 0; i < name.length && qi < query.length; i++) {
+      if (name[i] === query[qi]) qi++;
+      else if (qi > 0) gap++;
+    }
+    return qi === query.length ? 200 - gap + pinBoost : -1;
+  }
+
+  function passesFilter(c) {
+    if (filterMode === 'pinned') return !!c.pinned;
+    if (filterMode === 'alias') return !!c.alias;
+    return true;
+  }
+
+  function scheduleRender(delay = 0) {
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(() => {
+      if (renderFrame) cancelAnimationFrame(renderFrame);
+      renderFrame = requestAnimationFrame(filterAndRender);
+    }, delay);
+  }
+
+  function filterAndRender() {
+    renderFrame = 0;
+    const query = normalize(q.value.trim());
+    const ranked = [];
+
+    for (let i = 0; i < commands.length; i++) {
+      const c = commands[i];
+      if (!passesFilter(c)) continue;
+      const s = score(c, query);
+      if (!query || s >= 0) ranked.push([s, c]);
+    }
+
+    ranked.sort((a, b) => b[0] - a[0] || a[1].name.localeCompare(b[1].name));
+    filtered = ranked.slice(0, 100).map(x => x[1]);
+    activeIndex = filtered.length ? Math.min(activeIndex, filtered.length - 1) : 0;
+    renderList();
+  }
+
+  function renderList() {
+    if (!filtered.length) {
+      list.innerHTML = '<div class="empty"><div><div class="empty-icon">⌕</div><div class="empty-title">Không tìm thấy công cụ</div><div class="empty-sub">Thử tên khác hoặc bấm ↻ để quét lại.</div></div></div>';
+    } else {
+      const html = new Array(filtered.length);
+      for (let i = 0; i < filtered.length; i++) {
+        const c = filtered[i];
+        const meta = [c.extension, c.toolbar, c.tooltip].filter(Boolean).join(' · ');
+        const alias = c.alias ? `<span class="alias">→ ${escapeHtml(c.alias)}</span>` : '';
+        const shortcut = c.shortcut ? `<span class="shortcut">${escapeHtml(c.shortcut)}</span>` : '';
+        const pinBadge = c.pinned ? '<span class="badge pin">📌 GHIM</span>' : '';
+        const pinButton = c.pinned
+          ? '<button class="mini pin-btn" disabled title="Đã ghim trên Quick Tools">✓</button>'
+          : '<button class="mini pin-btn" data-action="pin" title="Ghim ra thanh Quick Tools">📌</button>';
+
+        html[i] = `<div class="item ${i === activeIndex ? 'active' : ''} ${c.pinned ? 'pinned' : ''}" data-i="${i}">
+          <div class="content">
+            <div class="title-line">
+              <div class="name">${escapeHtml(c.name)}</div>
+              ${alias}${pinBadge}${shortcut}
+            </div>
+            <div class="meta">${escapeHtml(meta)}</div>
+          </div>
+          <div class="actions">
+            ${pinButton}
+            <button class="mini alias-btn" data-action="alias" title="Đặt tên gợi nhớ">✎</button>
+            <button class="mini shortcut-btn" data-action="shortcut" title="Đặt phím tắt">⌨</button>
+          </div>
+        </div>`;
+      }
+      list.innerHTML = html.join('');
+    }
+
+    count.textContent = `${filtered.length} / ${commands.length} công cụ`;
+    clearBtn.classList.toggle('visible', q.value.length > 0);
+    ensureActiveVisible(false);
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+
+  function setActive(next) {
+    if (!filtered.length) return;
+    next = Math.max(0, Math.min(next, filtered.length - 1));
+    if (next === activeIndex) return;
+
+    const oldEl = list.querySelector(`.item[data-i="${activeIndex}"]`);
+    if (oldEl) oldEl.classList.remove('active');
+    activeIndex = next;
+    const newEl = list.querySelector(`.item[data-i="${activeIndex}"]`);
+    if (newEl) newEl.classList.add('active');
+    ensureActiveVisible(true);
+  }
+
+  function ensureActiveVisible(smooth) {
+    const el = list.querySelector('.item.active');
+    if (!el) return;
+    const top = el.offsetTop;
+    const bottom = top + el.offsetHeight;
+    if (top < list.scrollTop || bottom > list.scrollTop + list.clientHeight) {
+      el.scrollIntoView({ block: 'nearest', behavior: smooth ? 'smooth' : 'auto' });
+    }
+  }
+
+  function run(index = activeIndex) {
+    const c = filtered[index];
+    if (c) window.sketchup.run(c.id);
+  }
+
+  q.addEventListener('input', () => {
+    activeIndex = 0;
+    clearBtn.classList.toggle('visible', q.value.length > 0);
+    scheduleRender(45);
+  });
+
+  q.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIndex + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIndex - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); run(); }
+    else if (e.key === 'Escape') { e.preventDefault(); window.close(); }
+  });
+
+  clearBtn.addEventListener('click', () => {
+    q.value = '';
+    activeIndex = 0;
+    scheduleRender();
+    q.focus();
+  });
+
+  chips.forEach(chip => chip.addEventListener('click', () => {
+    filterMode = chip.dataset.filter || 'all';
+    chips.forEach(x => x.classList.toggle('active', x === chip));
+    activeIndex = 0;
+    scheduleRender();
+    q.focus();
+  }));
+
+  list.addEventListener('mousemove', e => {
+    const item = e.target.closest('.item');
+    if (!item) return;
+    const i = Number(item.dataset.i);
+    if (Number.isInteger(i) && i !== activeIndex) setActive(i);
+  });
+
+  list.addEventListener('click', e => {
+    const item = e.target.closest('.item');
+    if (!item) return;
+    const i = Number(item.dataset.i);
+    const c = filtered[i];
+    if (!c) return;
+    const button = e.target.closest('button');
+    const action = button && button.dataset.action;
+    if (action === 'pin') { e.stopPropagation(); window.sketchup.pin(c.key); return; }
+    if (action === 'alias') { e.stopPropagation(); window.sketchup.editAlias(c.key); return; }
+    if (action === 'shortcut') { e.stopPropagation(); window.sketchup.shortcut(c.key); return; }
+    if (!button) run(i);
+  });
+
+  refreshBtn.addEventListener('click', () => {
+    refreshBtn.classList.add('spin');
+    window.sketchup.refresh();
+  });
+  document.getElementById('finderShortcut').addEventListener('click', () => window.sketchup.finderShortcut());
+  document.getElementById('showToolbar').addEventListener('click', () => window.sketchup.showToolbar());
+  document.getElementById('showQuickTools').addEventListener('click', () => window.sketchup.showQuickTools());
+
+  window.setCommands = data => {
+    commands = (data || []).map(prepare);
+    activeIndex = 0;
+    refreshBtn.classList.remove('spin');
+    filterAndRender();
+    q.focus();
+    q.select();
+  };
+
+  window.addEventListener('load', () => window.sketchup.ready());
+})();
+</script>
+</body>
+</html>
