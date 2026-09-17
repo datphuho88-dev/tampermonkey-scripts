@@ -1,0 +1,1 @@
+Cài file tim_cong_cu_nhanh_v0.3.3.rbz bằng SketchUp > Extension Manager > Install Extension. Sau khi cài, ghim công cụ một lần. Từ v0.3.3, danh sách ghim được lưu bền qua lần khởi động tiếp theo.
