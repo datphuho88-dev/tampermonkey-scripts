@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quick Tool Finder</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    background: Canvas;
+    color: CanvasText;
+    overflow: hidden;
+  }
+  .app { height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+  .top { padding: 12px; border-bottom: 1px solid #d7d7d7; }
+  .search-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; }
+  input {
+    width: 100%; border: 1px solid #c8c8c8; border-radius: 8px; padding: 11px 12px;
+    font-size: 16px; outline: none; background: Field; color: FieldText;
+  }
+  input:focus { border-color: Highlight; }
+  button {
+    border: 1px solid #c8c8c8; border-radius: 8px; padding: 0 11px;
+    background: ButtonFace; color: ButtonText; cursor: pointer;
+  }
+  button:hover { filter: brightness(.96); }
+  .hint { margin-top: 7px; font-size: 12px; opacity: .68; }
+  .list { overflow: auto; padding: 6px; }
+  .item {
+    display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
+    padding: 9px 10px; border-radius: 7px; cursor: pointer; border: 1px solid transparent;
+  }
+  .item:hover, .item.active { background: rgba(47,128,237,.14); border-color: rgba(47,128,237,.45); }
+  .name { font-size: 14px; font-weight: 600; line-height: 1.25; }
+  .alias { margin-left: 8px; font-size: 12px; font-weight: 600; opacity: .85; }
+  .shortcut { margin-left: 7px; font-size: 11px; padding: 1px 6px; border: 1px solid #999; border-radius: 5px; opacity: .8; }
+  .meta { margin-top: 3px; font-size: 11px; opacity: .65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .actions { display: flex; gap: 5px; }
+  .mini { height: 28px; padding: 0 8px; font-size: 11px; border-radius: 6px; white-space: nowrap; }
+  .footer {
+    display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px;
+    border-top: 1px solid #d7d7d7; font-size: 11px; opacity: .72;
+  }
+  .empty { padding: 24px 12px; text-align: center; opacity: .6; }
+  @media (max-width: 620px) {
+    .search-row { grid-template-columns: 1fr auto auto; }
+    #finderShortcut { display: none; }
+    .actions .shortcut-btn { display: none; }
+  }
+  @media (prefers-color-scheme: dark) {
+    .top, .footer { border-color: #444; }
+    input, button { border-color: #555; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="search-row">
+      <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Tìm công cụ… ví dụ: make box hoặc hình vuông">
+      <button id="finderShortcut" title="Đặt phím tắt mở Quick Tool Finder">⌨ Finder</button>
+      <button id="showToolbar" title="Hiện icon Quick Tool Finder trên màn hình">▣</button>
+      <button id="refresh" title="Quét lại công cụ">↻</button>
+    </div>
+    <div class="hint">Gõ để tìm · ↑/↓ chọn · Enter chạy · ✎ đặt tên gợi nhớ · ⌨ tạo lệnh để gán phím tắt</div>
+  </div>
+  <div id="list" class="list"></div>
+  <div class="footer"><span id="count">0 công cụ</span><span>Quick Tool Finder v0.2.0</span></div>
+</div>
+<script>
+(() => {
+  let commands = [];
+  let filtered = [];
+  let activeIndex = 0;
+  const q = document.getElementById('q');
+  const list = document.getElementById('list');
+  const count = document.getElementById('count');
+
+  function normalize(s) {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function searchable(c) {
+    return normalize([c.alias, c.name, c.tooltip, c.status, c.extension, c.source, c.toolbar].join(' '));
+  }
+
+  function score(c, query) {
+    if (!query) return c.alias ? 20 : 0;
+    const alias = normalize(c.alias);
+    const name = normalize(c.name);
+    const all = c._search;
+    if (alias && alias === query) return 1300;
+    if (alias && alias.startsWith(query)) return 1150 - alias.length;
+    if (alias && alias.indexOf(query) >= 0) return 1050 - alias.indexOf(query);
+    if (name === query) return 1000;
+    if (name.startsWith(query)) return 850 - name.length;
+    const word = name.split(/\s+/).findIndex(w => w.startsWith(query));
+    if (word >= 0) return 700 - word;
+    const pos = name.indexOf(query);
+    if (pos >= 0) return 600 - pos;
+    const allPos = all.indexOf(query);
+    if (allPos >= 0) return 400 - allPos;
+
+    let qi = 0;
+    let gap = 0;
+    for (let i = 0; i < name.length && qi < query.length; i++) {
+      if (name[i] === query[qi]) qi++;
+      else if (qi > 0) gap++;
+    }
+    return qi === query.length ? 200 - gap : -1;
+  }
+
+  function render() {
+    const query = normalize(q.value.trim());
+    const ranked = [];
+    for (const c of commands) {
+      const s = score(c, query);
+      if (!query || s >= 0) ranked.push([s, c]);
+    }
+    ranked.sort((a, b) => b[0] - a[0] || a[1].name.localeCompare(b[1].name));
+    filtered = ranked.slice(0, 100).map(x => x[1]);
+    activeIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
+
+    if (!filtered.length) {
+      list.innerHTML = '<div class="empty">Không tìm thấy công cụ phù hợp.</div>';
+    } else {
+      list.innerHTML = filtered.map((c, i) => {
+        const meta = [c.extension, c.toolbar, c.tooltip].filter(Boolean).join(' · ');
+        const alias = c.alias ? `<span class="alias">→ ${escapeHtml(c.alias)}</span>` : '';
+        const shortcut = c.shortcut ? `<span class="shortcut">${escapeHtml(c.shortcut)}</span>` : '';
+        return `<div class="item ${i === activeIndex ? 'active' : ''}" data-i="${i}">
+          <div class="content">
+            <div class="name">${escapeHtml(c.name)} ${alias} ${shortcut}</div>
+            <div class="meta">${escapeHtml(meta)}</div>
+          </div>
+          <div class="actions">
+            <button class="mini alias-btn" data-action="alias" title="Đặt tên gợi nhớ">✎ Tên</button>
+            <button class="mini shortcut-btn" data-action="shortcut" title="Tạo lệnh để gán phím tắt">⌨ Phím</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    count.textContent = `${filtered.length} / ${commands.length} công cụ`;
+    ensureActiveVisible();
+  }
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+
+  function ensureActiveVisible() {
+    const el = list.querySelector('.item.active');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  function run(index = activeIndex) {
+    const c = filtered[index];
+    if (!c) return;
+    window.sketchup.run(c.id);
+  }
+
+  q.addEventListener('input', () => { activeIndex = 0; render(); });
+  q.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, filtered.length - 1); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); render(); }
+    else if (e.key === 'Enter') { e.preventDefault(); run(); }
+    else if (e.key === 'Escape') { e.preventDefault(); window.close(); }
+  });
+
+  list.addEventListener('click', e => {
+    const item = e.target.closest('.item');
+    if (!item) return;
+    const i = Number(item.dataset.i);
+    const c = filtered[i];
+    if (!c) return;
+    const action = e.target.closest('button')?.dataset.action;
+    if (action === 'alias') { e.stopPropagation(); window.sketchup.editAlias(c.key); return; }
+    if (action === 'shortcut') { e.stopPropagation(); window.sketchup.shortcut(c.key); return; }
+    run(i);
+  });
+
+  document.getElementById('refresh').addEventListener('click', () => window.sketchup.refresh());
+  document.getElementById('finderShortcut').addEventListener('click', () => window.sketchup.finderShortcut());
+  document.getElementById('showToolbar').addEventListener('click', () => window.sketchup.showToolbar());
+
+  window.setCommands = data => {
+    commands = (data || []).map(c => Object.assign(c, { _search: searchable(c) }));
+    activeIndex = 0;
+    render();
+    q.focus();
+    q.select();
+  };
+
+  window.addEventListener('load', () => window.sketchup.ready());
+})();
+</script>
+</body>
+</html>
