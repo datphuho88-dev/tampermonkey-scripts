@@ -1,0 +1,1 @@
+Install the packaged file quick_tool_finder_v0.2.0.rbz from SketchUp > Extension Manager. After upgrading from v0.1.x, restart SketchUp once so the toolbar/menu command set is rebuilt cleanly.
