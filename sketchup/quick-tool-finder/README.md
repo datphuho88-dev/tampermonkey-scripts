@@ -4,6 +4,7 @@ Versioned source archive for the SketchUp command palette plugin.
 
 ## Versions
 
+- `v0.4.1` — sửa gỡ ghim hoạt động ngay, tránh ghim đã xóa bị khôi phục, thêm giao diện quản lý nhóm, tạo/đổi tên/xóa nhóm và bộ chọn nhóm trực quan, 2026-09-17.
 - `v0.4.0` — thêm gỡ ghim, phân nhóm ghim tùy ý, đổi nhóm, toolbar riêng theo nhóm và bộ lọc nhóm, 2026-09-17.
 - `v0.3.3` — sửa lưu/khôi phục ghim qua Preferences + AppData và tự dựng lại sau khi SketchUp khởi động, 2026-09-17.
 - `v0.3.2` — renamed visible plugin/window to `Tìm Công Cụ Nhanh`; features and saved settings remain unchanged, 2026-09-17.
