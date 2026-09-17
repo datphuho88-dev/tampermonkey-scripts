@@ -4,6 +4,7 @@ Versioned source archive for the SketchUp command palette plugin.
 
 ## Versions
 
+- `v0.2.0` — force-show toolbar, persistent mnemonic aliases, and shortcut helper, 2026-09-17.
 - `v0.1.0` — initial working build, 2026-09-17.
 
 ## Versioning rule
