@@ -1,0 +1,1 @@
+Binary assets for this release are committed through Git blobs so PNG/RBZ bytes are preserved exactly.
