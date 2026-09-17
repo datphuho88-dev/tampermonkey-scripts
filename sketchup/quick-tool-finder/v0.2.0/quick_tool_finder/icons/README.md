@@ -1,0 +1,1 @@
+Toolbar icon files for Quick Tool Finder v0.2.0. The packaged RBZ contains `search_24.png` and `search_32.png`.
