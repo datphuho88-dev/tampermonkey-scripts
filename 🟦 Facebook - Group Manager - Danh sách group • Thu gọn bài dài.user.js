@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.3
+// @version      1.4.4
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.4.3';
+  const VERSION = '1.4.4';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -37,6 +37,8 @@
   let toastTimer = 0;
   let dragMove = null;
   let dragUp = null;
+  let dragFrame = 0;
+  let dragging = false;
   let hideImages = localStorage.getItem(IMAGE_KEY) !== '0';
   let hiddenCount = 0;
 
@@ -173,26 +175,74 @@
 
   function enableDrag(panel) {
     const head = $('.vada-fb-header', panel);
+    if (!head) return;
+
     head.addEventListener('pointerdown', e => {
       if (e.button !== 0 || e.target.closest('button')) return;
       e.preventDefault();
+
       const r = panel.getBoundingClientRect();
-      const dx = e.clientX - r.left;
-      const dy = e.clientY - r.top;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const baseLeft = r.left;
+      const baseTop = r.top;
+      const panelW = r.width;
+      const panelH = r.height;
+      let dx = 0;
+      let dy = 0;
+
+      dragging = true;
+      clearTimeout(scanTimer);
+      observer?.disconnect();
+
       panel.style.right = 'auto';
-      dragMove = ev => {
-        panel.style.left = `${Math.max(0, Math.min(ev.clientX - dx, innerWidth - panel.offsetWidth))}px`;
-        panel.style.top = `${Math.max(0, Math.min(ev.clientY - dy, innerHeight - 34))}px`;
+      panel.style.left = baseLeft + 'px';
+      panel.style.top = baseTop + 'px';
+      panel.style.willChange = 'transform';
+      panel.style.transform = 'translate3d(0,0,0)';
+      panel.style.transition = 'none';
+
+      const render = () => {
+        dragFrame = 0;
+        panel.style.transform = `translate3d(${dx}px,${dy}px,0)`;
       };
+
+      dragMove = ev => {
+        dx = Math.max(-baseLeft, Math.min(ev.clientX - startX, innerWidth - panelW - baseLeft));
+        dy = Math.max(-baseTop, Math.min(ev.clientY - startY, innerHeight - 34 - baseTop));
+        if (!dragFrame) dragFrame = requestAnimationFrame(render);
+      };
+
       dragUp = () => {
-        const rr = panel.getBoundingClientRect();
-        localStorage.setItem(POS_KEY, JSON.stringify({ left: Math.round(rr.left), top: Math.round(rr.top) }));
+        if (dragFrame) {
+          cancelAnimationFrame(dragFrame);
+          dragFrame = 0;
+        }
+
+        const left = Math.round(baseLeft + dx);
+        const top = Math.round(baseTop + dy);
+
+        panel.style.transform = '';
+        panel.style.willChange = '';
+        panel.style.transition = '';
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+
+        localStorage.setItem(POS_KEY, JSON.stringify({ left, top }));
+
         window.removeEventListener('pointermove', dragMove, true);
         window.removeEventListener('pointerup', dragUp, true);
+        window.removeEventListener('pointercancel', dragUp, true);
         dragMove = dragUp = null;
+        dragging = false;
+
+        if (observer && document.body) observer.observe(document.body, { childList: true, subtree: true });
+        scheduleScan();
       };
-      window.addEventListener('pointermove', dragMove, true);
+
+      window.addEventListener('pointermove', dragMove, { capture: true, passive: true });
       window.addEventListener('pointerup', dragUp, true);
+      window.addEventListener('pointercancel', dragUp, true);
     });
   }
 
@@ -474,15 +524,20 @@
   }
 
   function scheduleScan() {
+    if (dragging) return;
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => { scanPosts(); applyImageHiding(true); }, 180);
+    scanTimer = setTimeout(() => {
+      if (dragging) return;
+      scanPosts();
+      applyImageHiding(true);
+    }, 220);
   }
 
   function startObserver() {
     observer?.disconnect();
     observer = new MutationObserver(() => scheduleScan());
     observer.observe(document.body, { childList: true, subtree: true });
-    imageTimer = setInterval(() => { if (hideImages) applyImageHiding(true); }, 900);
+    imageTimer = setInterval(() => { if (hideImages && !dragging) applyImageHiding(true); }, 1200);
   }
 
   function resetCollapsed() {
@@ -493,8 +548,14 @@
   function cleanup() {
     observer?.disconnect(); observer = null;
     clearTimeout(scanTimer); clearTimeout(toastTimer); clearInterval(imageTimer);
+    if (dragFrame) cancelAnimationFrame(dragFrame);
+    dragFrame = 0;
+    dragging = false;
     if (dragMove) window.removeEventListener('pointermove', dragMove, true);
-    if (dragUp) window.removeEventListener('pointerup', dragUp, true);
+    if (dragUp) {
+      window.removeEventListener('pointerup', dragUp, true);
+      window.removeEventListener('pointercancel', dragUp, true);
+    }
     dragMove = dragUp = null;
     resetCollapsed();
     restoreImages();
