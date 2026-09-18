@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.2
+// @version      1.4.3
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.4.2';
+  const VERSION = '1.4.3';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -72,8 +72,62 @@
   function currentGroup() {
     const m = location.pathname.match(/^\/groups\/([^/?#]+)/i);
     if (!m) return null;
-    const name = $('h1')?.textContent?.trim() || document.title.replace(/\s*\|\s*Facebook\s*$/i, '').trim() || `Group ${m[1]}`;
-    return { id: m[1], name, url: `${location.origin}/groups/${m[1]}` };
+
+    const id = m[1];
+    const rootPath = `/groups/${id}`;
+    const ignored = new Set([
+      'đoạn chat','trang chủ của cộng đồng','tổng quan','hỗ trợ quản trị',
+      'yêu cầu hủy hiệu','bài viết đang chờ','có thể là spam','bài viết đã lên lịch',
+      'nhật ký hoạt động','quy tắc nhóm','nội dung bị thành viên báo cáo',
+      'thông báo kiểm duyệt','trạng thái nhóm','vai trò trong cộng đồng',
+      'cài đặt nhóm','thêm thành viên','mức độ tăng trưởng','lượt tương tác',
+      'quản trị viên và người kiểm duyệt','người tham gia'
+    ]);
+
+    const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+    const valid = s => {
+      const t = clean(s);
+      if (!t || t.length < 2 || t.length > 140) return false;
+      return !ignored.has(t.toLowerCase()) && !/^facebook$/i.test(t);
+    };
+
+    const candidates = [];
+    for (const a of document.querySelectorAll('a[href]')) {
+      let u;
+      try { u = new URL(a.href, location.origin); } catch (_) { continue; }
+      if (u.origin !== location.origin) continue;
+
+      const p = u.pathname.replace(/\/+$/, '');
+      if (p !== rootPath && !p.startsWith(rootPath + '/')) continue;
+
+      const label = clean(a.innerText || a.getAttribute('aria-label'));
+      if (!valid(label)) continue;
+
+      const r = a.getBoundingClientRect();
+      let score = 0;
+      if (p === rootPath) score += 500;
+      if (r.top >= 0 && r.top < 135) score += 900;
+      if (r.left >= 0 && r.left < 420) score += 350;
+      if (a.closest('h1,h2,h3')) score += 500;
+      if (label.length >= 6 && label.length <= 80) score += 100;
+      candidates.push({ name: label, score });
+    }
+
+    candidates.sort((a, b) => b.score - a.score || a.name.length - b.name.length);
+    let name = candidates[0]?.name || '';
+
+    if (!valid(name)) {
+      const og = clean(document.querySelector('meta[property="og:title"]')?.content);
+      if (valid(og)) name = og;
+    }
+
+    if (!valid(name)) {
+      const title = clean(document.title.replace(/\s*\|\s*Facebook\s*$/i, ''));
+      if (valid(title) && !ignored.has(title.toLowerCase())) name = title;
+    }
+
+    if (!valid(name)) name = `Group ${id}`;
+    return { id, name, url: `${location.origin}/groups/${id}` };
   }
 
   function esc(v) {
