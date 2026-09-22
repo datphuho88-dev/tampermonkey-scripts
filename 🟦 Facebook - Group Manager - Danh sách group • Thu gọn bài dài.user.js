@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.7
+// @version      1.5.0
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -9,14 +9,17 @@
 // @updateURL    https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js
 // @downloadURL  https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @connect      raw.githubusercontent.com
+// @connect      api.github.com
 // @run-at       document-idle
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const VERSION = '1.4.7';
+  const VERSION = '1.5.0';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -24,6 +27,10 @@
   const GROUP_KEY = 'vada_fb_group_manager_groups_v1';
   const POS_KEY = 'vada_fb_group_manager_position_v1';
   const IMAGE_KEY = 'vada_fb_hide_review_images_v1';
+  const SAVED_KEY = 'vada_fb_review_saved_posts_v1';
+  const GIST_ID_KEY = 'vada_fb_review_gist_id_v1';
+  const GIST_TOKEN_KEY = 'vada_fb_review_gist_token_v1';
+  const GIST_FILE = 'fb-review-posts.json';
   const TARGET_ATTR = 'data-vada-fb-collapse-target';
   const IMAGE_ATTR = 'data-vada-fb-image-hidden';
   const VIDEO_ATTR = 'data-vada-fb-video-hidden';
@@ -41,6 +48,9 @@
   let dragging = false;
   let hideImages = localStorage.getItem(IMAGE_KEY) !== '0';
   let hiddenCount = 0;
+  let syncTimer = 0;
+  let lastArticle = null;
+  let quickSaveHandler = null;
 
   const imageStyles = new Map();
   const videoStyles = new Map();
@@ -69,6 +79,241 @@
 
   function saveGroups(data) {
     localStorage.setItem(GROUP_KEY, JSON.stringify(data));
+  }
+
+  function reviewRecords() {
+    try {
+      const data = GM_getValue(SAVED_KEY, []);
+      return Array.isArray(data) ? data : [];
+    } catch (_) { return []; }
+  }
+
+  function saveReviewRecords(data) {
+    try { GM_setValue(SAVED_KEY, Array.isArray(data) ? data : []); } catch (_) {}
+  }
+
+  function normalizePostUrl(url) {
+    try {
+      const u = new URL(url, location.origin);
+      u.hash = '';
+      for (const k of [...u.searchParams.keys()]) {
+        if (/^(fbclid|__cft__|__tn__|mibextid|ref|refid)$/i.test(k)) u.searchParams.delete(k);
+      }
+      return u.href;
+    } catch (_) { return String(url || '').trim(); }
+  }
+
+  function reviewId(url) {
+    const s = normalizePostUrl(url);
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36);
+  }
+
+  function visibleReviewRecords() {
+    return reviewRecords()
+      .filter(x => x && !x.deleted && x.url)
+      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  }
+
+  function renderReviewList() {
+    const box = $('#vada-fb-review-list');
+    if (!box) return;
+    const rows = visibleReviewRecords();
+    const count = $('#vada-fb-review-count');
+    if (count) count.textContent = rows.length ? String(rows.length) : '';
+    if (!rows.length) {
+      box.innerHTML = '<div class="vada-fb-empty">Chưa lưu bài nào.</div>';
+      return;
+    }
+    box.innerHTML = rows.map((item, i) => {
+      let host = '';
+      try { host = new URL(item.url).pathname.split('/').filter(Boolean).slice(-2).join('/'); } catch (_) {}
+      const label = item.title || item.groupName || host || ('Bài ' + (i + 1));
+      return `
+        <div class="vada-fb-review-row">
+          <button class="vada-fb-review-open" data-id="${esc(item.id)}" data-url="${esc(item.url)}" title="${esc(item.url)}">
+            <span class="vada-fb-review-index">${i + 1}</span>
+            <span class="vada-fb-review-name">${esc(label)}</span>
+          </button>
+          <button class="vada-fb-review-delete" data-id="${esc(item.id)}" title="Xóa">×</button>
+        </div>`;
+    }).join('');
+  }
+
+  function mergeReviewRecords(local, remote) {
+    const map = new Map();
+    for (const item of [...(Array.isArray(local) ? local : []), ...(Array.isArray(remote) ? remote : [])]) {
+      if (!item?.id) continue;
+      const old = map.get(item.id);
+      if (!old || Number(item.updatedAt || 0) >= Number(old.updatedAt || 0)) map.set(item.id, item);
+    }
+    return [...map.values()];
+  }
+
+  function githubGistRequest(method, url, body) {
+    return new Promise((resolve, reject) => {
+      const token = String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim();
+      if (!token) return reject(new Error('Chưa cấu hình GitHub token'));
+      GM_xmlhttpRequest({
+        method,
+        url,
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'Authorization': 'Bearer ' + token,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json'
+        },
+        data: body ? JSON.stringify(body) : undefined,
+        timeout: 15000,
+        onload(res) {
+          let data = null;
+          try { data = res.responseText ? JSON.parse(res.responseText) : null; } catch (_) {}
+          if (res.status >= 200 && res.status < 300) resolve(data);
+          else reject(new Error('GitHub HTTP ' + res.status + (data?.message ? ': ' + data.message : '')));
+        },
+        onerror() { reject(new Error('Không kết nối được GitHub')); },
+        ontimeout() { reject(new Error('GitHub timeout')); }
+      });
+    });
+  }
+
+  function setSyncStatus(text) {
+    const el = $('#vada-fb-sync-status');
+    if (el) el.textContent = text;
+  }
+
+  async function ensureGist() {
+    let gistId = String(GM_getValue(GIST_ID_KEY, '') || '').trim();
+    if (gistId) return gistId;
+    const created = await githubGistRequest('POST', 'https://api.github.com/gists', {
+      description: 'VADA Facebook review queue sync',
+      public: false,
+      files: { [GIST_FILE]: { content: JSON.stringify({ version: 1, items: reviewRecords() }, null, 2) } }
+    });
+    gistId = String(created?.id || '');
+    if (!gistId) throw new Error('Không tạo được Gist');
+    GM_setValue(GIST_ID_KEY, gistId);
+    return gistId;
+  }
+
+  async function syncReviews(showToast = false) {
+    const token = String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim();
+    if (!token) {
+      setSyncStatus('☁ Chưa cấu hình đồng bộ');
+      return;
+    }
+    setSyncStatus('☁ Đang đồng bộ...');
+    try {
+      const gistId = await ensureGist();
+      const gist = await githubGistRequest('GET', 'https://api.github.com/gists/' + encodeURIComponent(gistId));
+      let remoteItems = [];
+      const raw = gist?.files?.[GIST_FILE]?.content || '';
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          remoteItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
+        } catch (_) {}
+      }
+      const merged = mergeReviewRecords(reviewRecords(), remoteItems);
+      saveReviewRecords(merged);
+      await githubGistRequest('PATCH', 'https://api.github.com/gists/' + encodeURIComponent(gistId), {
+        files: { [GIST_FILE]: { content: JSON.stringify({ version: 1, updatedAt: Date.now(), items: merged }, null, 2) } }
+      });
+      renderReviewList();
+      setSyncStatus('☁ Đã đồng bộ • ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+      if (showToast) toast('Đã đồng bộ danh sách để duyệt.');
+    } catch (err) {
+      console.error('[VADA FB] sync lỗi:', err);
+      setSyncStatus('☁ Lỗi: ' + err.message);
+      if (showToast) toast('Đồng bộ lỗi: ' + err.message);
+    }
+  }
+
+  function scheduleReviewSync() {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => syncReviews(false), 700);
+  }
+
+  function saveReviewPost(url, title = '') {
+    url = normalizePostUrl(url);
+    if (!/^https?:\/\/(?:www\.)?facebook\.com\//i.test(url)) return false;
+    const now = Date.now();
+    const id = reviewId(url);
+    const data = reviewRecords();
+    const i = data.findIndex(x => x.id === id);
+    const g = currentGroup();
+    const old = i >= 0 ? data[i] : null;
+    const item = {
+      id,
+      url,
+      title: String(title || old?.title || '').trim(),
+      groupId: g?.id || old?.groupId || '',
+      groupName: g?.name || old?.groupName || '',
+      createdAt: old?.createdAt || now,
+      updatedAt: now,
+      deleted: false
+    };
+    if (i >= 0) data[i] = item;
+    else data.unshift(item);
+    saveReviewRecords(data);
+    renderReviewList();
+    scheduleReviewSync();
+    toast(i >= 0 ? 'Đã cập nhật bài trong ĐỂ DUYỆT.' : 'Đã lưu bài vào ĐỂ DUYỆT.');
+    return true;
+  }
+
+  function deleteReviewPost(id) {
+    const data = reviewRecords();
+    const i = data.findIndex(x => x.id === id);
+    if (i < 0) return;
+    data[i] = { ...data[i], deleted: true, updatedAt: Date.now() };
+    saveReviewRecords(data);
+    renderReviewList();
+    scheduleReviewSync();
+    toast('Đã xóa khỏi danh sách để duyệt.');
+  }
+
+  function findArticlePermalink(article) {
+    if (!(article instanceof HTMLElement)) return '';
+    const links = [...article.querySelectorAll('a[href]')].map(a => a.href).filter(Boolean);
+    return links.find(h => /\/groups\/[^/]+\/posts\/|\/permalink\/|story_fbid=|\/posts\//i.test(h)) || '';
+  }
+
+  async function saveClipboardPost() {
+    let url = '';
+    try { url = await navigator.clipboard.readText(); } catch (_) {}
+    if (!url) url = findArticlePermalink(lastArticle);
+    if (!saveReviewPost(url)) toast('Không đọc được link bài. Hãy cho phép đọc clipboard hoặc mở menu bài rồi thử lại.');
+  }
+
+  function setupQuickSaveCapture() {
+    quickSaveHandler = e => {
+      const article = e.target?.closest?.('[role="article"]');
+      if (article) lastArticle = article;
+
+      const action = e.target?.closest?.('[role="menuitem"],[role="button"],button');
+      const t = (action?.innerText || e.target?.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!t.includes('sao chép liên kết để chia sẻ với quản trị viên')) return;
+      setTimeout(() => saveClipboardPost(), 180);
+    };
+    document.addEventListener('click', quickSaveHandler, true);
+  }
+
+  async function configureReviewSync() {
+    const oldId = String(GM_getValue(GIST_ID_KEY, '') || '');
+    const gistId = prompt('GitHub Gist ID dùng chung giữa các máy.\nĐể trống nếu muốn tạo Gist mới:', oldId);
+    if (gistId === null) return;
+    const oldToken = String(GM_getValue(GIST_TOKEN_KEY, '') || '');
+    const token = prompt('GitHub token có quyền Gist.\nToken chỉ lưu trong Tampermonkey trên máy này, không ghi vào userscript/GitHub repo:', oldToken ? '••••••••' : '');
+    if (token === null) return;
+    if (gistId.trim()) GM_setValue(GIST_ID_KEY, gistId.trim());
+    else GM_setValue(GIST_ID_KEY, '');
+    if (token !== '••••••••' && token.trim()) GM_setValue(GIST_TOKEN_KEY, token.trim());
+    await syncReviews(true);
   }
 
   function currentGroup() {
@@ -320,7 +565,17 @@
       #${PANEL_ID} .vada-fb-group-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700} #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
       #${PANEL_ID} .vada-fb-group-alias,#${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;font-size:16px}
       #${PANEL_ID} .vada-fb-group-alias{background:#111;color:#d7d7d7;border:1px solid #2a2a2a}
-      #${PANEL_ID} .vada-fb-group-delete{background:#160000;color:#ff6b6b;border:1px solid #3a1111;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#080808;color:#a8a8a8;border:1px solid #222;font-size:11px}
+      #${PANEL_ID} .vada-fb-group-delete{background:#160000;color:#ff6b6b;border:1px solid #3a1111;font-size:18px}
+      #${PANEL_ID} .vada-fb-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:7px 8px 0;background:#000}
+      #${PANEL_ID} .vada-fb-tab{border:1px solid #242424!important;background:#090909!important;color:#aaa!important;border-radius:7px!important;padding:6px!important;cursor:pointer!important;font-size:11px!important;font-weight:700!important}
+      #${PANEL_ID} .vada-fb-tab.active{background:#171717!important;color:#fff!important;border-color:#444!important}
+      #${PANEL_ID} .vada-fb-tab-pane{display:none} #${PANEL_ID} .vada-fb-tab-pane.active{display:block}
+      #${PANEL_ID} .vada-fb-review-row{display:flex;gap:4px;margin-bottom:4px}
+      #${PANEL_ID} .vada-fb-review-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #2a2a2a;background:#080808;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#f5f5f5}
+      #${PANEL_ID} .vada-fb-review-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;font-size:10px;font-weight:700}
+      #${PANEL_ID} .vada-fb-review-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+      #${PANEL_ID} .vada-fb-review-delete{width:28px;border:1px solid #3a1111;border-radius:7px;cursor:pointer;background:#160000;color:#ff6b6b;font-size:18px}
+      #${PANEL_ID} .vada-fb-sync-status{margin-top:6px;padding:6px;border:1px solid #222;border-radius:7px;background:#080808;color:#999;font-size:10px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#080808;color:#a8a8a8;border:1px solid #222;font-size:11px}
       [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
       [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
       [${IMAGE_ATTR}="1"],[${VIDEO_ATTR}="1"],[${BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;pointer-events:none!important}
@@ -336,21 +591,50 @@
     panel.id = PANEL_ID;
     panel.innerHTML = `
       <div class="vada-fb-header"><span>🟦 FB GROUP</span><div class="vada-fb-header-actions"><span class="vada-fb-version">v${VERSION}</span><button id="vada-fb-toggle">−</button></div></div>
+      <div class="vada-fb-tabs">
+        <button class="vada-fb-tab active" data-tab="groups">GROUP</button>
+        <button class="vada-fb-tab" data-tab="review">ĐỂ DUYỆT <span id="vada-fb-review-count"></span></button>
+      </div>
       <div id="vada-fb-panel-body">
-        <button id="vada-fb-add-current" class="vada-fb-primary">＋ Lưu group hiện tại</button>
-        <div class="vada-fb-section-title">📌 DANH SÁCH GROUP</div><div id="vada-fb-group-list"></div>
-        <div class="vada-fb-section-title">📑 ĐỌC NHANH BÀI DÀI</div><div class="vada-fb-status">Bài dài tự thu gọn còn ${MAX_LINES} dòng.</div>
-        <button id="vada-fb-rescan" class="vada-fb-secondary">↻ Quét lại bài viết</button>
-        <button id="vada-fb-hide-images" class="vada-fb-secondary"></button>
+        <div class="vada-fb-tab-pane active" data-pane="groups">
+          <button id="vada-fb-add-current" class="vada-fb-primary">＋ Lưu group hiện tại</button>
+          <div class="vada-fb-section-title">📌 DANH SÁCH GROUP</div><div id="vada-fb-group-list"></div>
+          <div class="vada-fb-section-title">📑 ĐỌC NHANH BÀI DÀI</div><div class="vada-fb-status">Bài dài tự thu gọn còn ${MAX_LINES} dòng.</div>
+          <button id="vada-fb-rescan" class="vada-fb-secondary">↻ Quét lại bài viết</button>
+          <button id="vada-fb-hide-images" class="vada-fb-secondary"></button>
+        </div>
+        <div class="vada-fb-tab-pane" data-pane="review">
+          <button id="vada-fb-save-clipboard" class="vada-fb-primary">＋ Lưu link đang copy</button>
+          <div class="vada-fb-section-title">🕒 BÀI ĐỂ DUYỆT SAU</div>
+          <div id="vada-fb-review-list"></div>
+          <div id="vada-fb-sync-status" class="vada-fb-sync-status">☁ Chưa cấu hình đồng bộ</div>
+          <button id="vada-fb-sync-now" class="vada-fb-secondary">☁ Đồng bộ ngay</button>
+          <button id="vada-fb-sync-config" class="vada-fb-secondary">⚙ Cấu hình đồng bộ</button>
+        </div>
         <button id="vada-fb-load" class="vada-fb-load">↻ LOAD</button>
       </div>`;
     document.body.appendChild(panel);
     loadPosition(panel);
     enableDrag(panel);
     renderGroups();
+    renderReviewList();
     updateImageButton();
+    if (String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim()) syncReviews(false);
 
     panel.addEventListener('click', e => {
+      const tab = e.target.closest('.vada-fb-tab');
+      if (tab) {
+        panel.querySelectorAll('.vada-fb-tab').forEach(x => x.classList.toggle('active', x === tab));
+        panel.querySelectorAll('.vada-fb-tab-pane').forEach(x => x.classList.toggle('active', x.dataset.pane === tab.dataset.tab));
+        return;
+      }
+      const reviewOpen = e.target.closest('.vada-fb-review-open');
+      if (reviewOpen) return void window.open(reviewOpen.dataset.url, '_blank', 'noopener');
+      const reviewDelete = e.target.closest('.vada-fb-review-delete');
+      if (reviewDelete) return deleteReviewPost(reviewDelete.dataset.id);
+      if (e.target.closest('#vada-fb-save-clipboard')) return void saveClipboardPost();
+      if (e.target.closest('#vada-fb-sync-now')) return void syncReviews(true);
+      if (e.target.closest('#vada-fb-sync-config')) return void configureReviewSync();
       const open = e.target.closest('.vada-fb-group-open');
       if (open) return void (location.href = open.dataset.url);
       const alias = e.target.closest('.vada-fb-group-alias');
@@ -553,6 +837,10 @@
     observer = new MutationObserver(() => scheduleScan());
     observer.observe(document.body, { childList: true, subtree: true });
     imageTimer = setInterval(() => { if (hideImages && !dragging) applyImageHiding(true); }, 1200);
+    setupQuickSaveCapture();
+    syncTimer = setInterval(() => {
+      if (String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim()) syncReviews(false);
+    }, 30000);
   }
 
   function resetCollapsed() {
@@ -562,7 +850,7 @@
 
   function cleanup() {
     observer?.disconnect(); observer = null;
-    clearTimeout(scanTimer); clearTimeout(toastTimer); clearInterval(imageTimer);
+    clearTimeout(scanTimer); clearTimeout(toastTimer); clearInterval(imageTimer); clearTimeout(syncTimer); clearInterval(syncTimer);
     if (dragFrame) cancelAnimationFrame(dragFrame);
     dragFrame = 0;
     dragging = false;
@@ -572,6 +860,8 @@
       window.removeEventListener('pointercancel', dragUp, true);
     }
     dragMove = dragUp = null;
+    if (quickSaveHandler) document.removeEventListener('click', quickSaveHandler, true);
+    quickSaveHandler = null;
     resetCollapsed();
     restoreImages();
     document.getElementById(PANEL_ID)?.remove();
