@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.5
+// @version      1.4.6
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.4.5';
+  const VERSION = '1.4.6';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -146,7 +146,8 @@
     }
     box.innerHTML = data.map((g, i) => `
       <div class="vada-fb-group-row">
-        <button class="vada-fb-group-open" data-url="${esc(g.url)}"><span class="vada-fb-group-index">${i + 1}</span><span class="vada-fb-group-name">${esc(g.name || g.url)}</span></button>
+        <button class="vada-fb-group-open" data-url="${esc(g.url)}"><span class="vada-fb-group-index">${i + 1}</span><span class="vada-fb-group-name">${esc(g.alias || g.name || g.url)}</span></button>
+        <button class="vada-fb-group-alias" data-url="${esc(g.url)}" title="Đặt biệt danh">✎</button>
         <button class="vada-fb-group-delete" data-url="${esc(g.url)}" title="Xóa">×</button>
       </div>`).join('');
   }
@@ -156,7 +157,7 @@
     if (!g) return toast('Hãy mở một group Facebook trước.');
     const data = groups();
     const i = data.findIndex(x => x.id === g.id || x.url === g.url);
-    if (i >= 0) data[i] = g;
+    if (i >= 0) data[i] = { ...data[i], ...g };
     else data.unshift(g);
     saveGroups(data);
     renderGroups();
@@ -317,7 +318,9 @@
       #${PANEL_ID} .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#65676b}
       #${PANEL_ID} .vada-fb-group-row{display:flex;gap:4px;margin-bottom:4px} #${PANEL_ID} .vada-fb-group-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #dddfe2;background:#f7f8fa;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#1c1e21}
       #${PANEL_ID} .vada-fb-group-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e4e6eb;font-size:10px;font-weight:700} #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
-      #${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;background:#fce8e8;color:#c62828;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
+      #${PANEL_ID} .vada-fb-group-alias,#${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;font-size:16px}
+      #${PANEL_ID} .vada-fb-group-alias{background:#eef3ff;color:#2563eb}
+      #${PANEL_ID} .vada-fb-group-delete{background:#fce8e8;color:#c62828;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
       [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
       [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
       [${IMAGE_ATTR}="1"],[${VIDEO_ATTR}="1"],[${BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;pointer-events:none!important}
@@ -350,6 +353,18 @@
     panel.addEventListener('click', e => {
       const open = e.target.closest('.vada-fb-group-open');
       if (open) return void (location.href = open.dataset.url);
+      const alias = e.target.closest('.vada-fb-group-alias');
+      if (alias) {
+        const data = groups();
+        const item = data.find(g => g.url === alias.dataset.url);
+        if (!item) return;
+        const value = prompt('Nhập biệt danh cho group:', item.alias || item.name || '');
+        if (value === null) return;
+        item.alias = value.trim();
+        saveGroups(data);
+        renderGroups();
+        return toast(item.alias ? 'Đã lưu biệt danh.' : 'Đã xóa biệt danh.');
+      }
       const del = e.target.closest('.vada-fb-group-delete');
       if (del) {
         saveGroups(groups().filter(g => g.url !== del.dataset.url));
