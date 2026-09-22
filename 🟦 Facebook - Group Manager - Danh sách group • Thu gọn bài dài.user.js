@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.4.6
+// @version      1.4.7
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.4.6';
+  const VERSION = '1.4.7';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -307,25 +307,25 @@
     const st = document.createElement('style');
     st.id = STYLE_ID;
     st.textContent = `
-      #${PANEL_ID}{position:fixed;top:88px;right:14px;z-index:2147483646;width:260px;max-height:calc(100vh - 40px);overflow:hidden;background:#fff;color:#1c1e21;border:1px solid #ccd0d5;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.18);font:13px/1.35 Arial,sans-serif}
+      #${PANEL_ID}{position:fixed;top:88px;right:14px;z-index:2147483646;width:260px;max-height:calc(100vh - 40px);overflow:hidden;background:#000;color:#f5f5f5;border:1px solid #262626;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.65);font:13px/1.35 Arial,sans-serif}
       #${PANEL_ID} *{box-sizing:border-box} #${PANEL_ID} button{font-family:inherit}
-      #${PANEL_ID} .vada-fb-header{height:34px;padding:0 8px 0 10px;display:flex;align-items:center;justify-content:space-between;background:#0866ff;color:#fff;font-weight:700;cursor:move;user-select:none;touch-action:none}
+      #${PANEL_ID} .vada-fb-header{height:34px;padding:0 8px 0 10px;display:flex;align-items:center;justify-content:space-between;background:#000;color:#fff;border-bottom:1px solid #222;font-weight:700;cursor:move;user-select:none;touch-action:none}
       #${PANEL_ID} .vada-fb-header-actions{display:flex;align-items:center;gap:6px} #${PANEL_ID} .vada-fb-version{font-size:10px;opacity:.85}
-      #${PANEL_ID} #vada-fb-toggle{width:25px;height:25px;border:0;border-radius:6px;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;font-size:18px}
+      #${PANEL_ID} #vada-fb-toggle{width:25px;height:25px;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer;background:#111;color:#fff;font-size:18px}
       #${PANEL_ID} #vada-fb-panel-body{padding:8px;max-height:calc(100vh - 80px);overflow:auto}
       #${PANEL_ID} .vada-fb-primary,#${PANEL_ID} .vada-fb-secondary,#${PANEL_ID} .vada-fb-load{width:100%;border:0;border-radius:7px;padding:7px 8px;cursor:pointer;font-weight:700}
-      #${PANEL_ID} .vada-fb-primary{background:#e7f3ff;color:#0866ff} #${PANEL_ID} .vada-fb-secondary{margin-top:6px;background:#f0f2f5;color:#444} #${PANEL_ID} .vada-fb-load{margin-top:6px;background:#0866ff;color:#fff}
-      #${PANEL_ID} .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#65676b}
-      #${PANEL_ID} .vada-fb-group-row{display:flex;gap:4px;margin-bottom:4px} #${PANEL_ID} .vada-fb-group-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #dddfe2;background:#f7f8fa;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#1c1e21}
-      #${PANEL_ID} .vada-fb-group-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e4e6eb;font-size:10px;font-weight:700} #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
+      #${PANEL_ID} .vada-fb-primary{background:#0a0a0a;color:#fff;border:1px solid #2a2a2a} #${PANEL_ID} .vada-fb-secondary{margin-top:6px;background:#0a0a0a;color:#e5e5e5;border:1px solid #2a2a2a} #${PANEL_ID} .vada-fb-load{margin-top:6px;background:#111;color:#fff;border:1px solid #333}
+      #${PANEL_ID} .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#bdbdbd}
+      #${PANEL_ID} .vada-fb-group-row{display:flex;gap:4px;margin-bottom:4px} #${PANEL_ID} .vada-fb-group-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #2a2a2a;background:#080808;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#f5f5f5}
+      #${PANEL_ID} .vada-fb-group-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700} #${PANEL_ID} .vada-fb-group-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
       #${PANEL_ID} .vada-fb-group-alias,#${PANEL_ID} .vada-fb-group-delete{width:28px;border:0;border-radius:7px;cursor:pointer;font-size:16px}
-      #${PANEL_ID} .vada-fb-group-alias{background:#eef3ff;color:#2563eb}
-      #${PANEL_ID} .vada-fb-group-delete{background:#fce8e8;color:#c62828;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#f0f2f5;color:#65676b;font-size:11px}
+      #${PANEL_ID} .vada-fb-group-alias{background:#111;color:#d7d7d7;border:1px solid #2a2a2a}
+      #${PANEL_ID} .vada-fb-group-delete{background:#160000;color:#ff6b6b;border:1px solid #3a1111;font-size:18px} #${PANEL_ID} .vada-fb-empty,#${PANEL_ID} .vada-fb-status{padding:7px;border-radius:7px;background:#080808;color:#a8a8a8;border:1px solid #222;font-size:11px}
       [${TARGET_ATTR}="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:${MAX_LINES}!important;overflow:hidden!important;max-height:none!important}
       [${TARGET_ATTR}="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important;max-height:none!important}
       [${IMAGE_ATTR}="1"],[${VIDEO_ATTR}="1"],[${BOX_ATTR}="1"]{display:none!important;visibility:hidden!important;opacity:0!important;width:0!important;height:0!important;min-width:0!important;min-height:0!important;max-width:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important;pointer-events:none!important}
       .vada-fb-expand-wrap{margin:3px 0!important}.vada-fb-expand-btn{border:0!important;background:transparent!important;padding:2px 0!important;color:#0866ff!important;cursor:pointer!important;font:700 12px Arial,sans-serif!important}
-      #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#1c1e21;color:#fff;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
+      #vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#000;color:#fff;border:1px solid #2a2a2a;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}
     `;
     document.head.appendChild(st);
   }
