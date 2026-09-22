@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.5.1
+// @version      1.5.2
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.5.1';
+  const VERSION = '1.5.2';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -73,12 +73,43 @@
   function groups() {
     try {
       const data = JSON.parse(localStorage.getItem(GROUP_KEY) || '[]');
-      return Array.isArray(data) ? data : [];
+      if (!Array.isArray(data)) return [];
+      let changed = false;
+      const now = Date.now();
+      const normalized = data.map((g, index) => {
+        if (!g || typeof g !== 'object') return g;
+        const next = { ...g };
+        if (!next.id) {
+          const m = String(next.url || '').match(/\/groups\/([^/?#]+)/i);
+          if (m) { next.id = m[1]; changed = true; }
+        }
+        if (typeof next.deleted !== 'boolean') { next.deleted = false; changed = true; }
+        if (!Number(next.updatedAt)) { next.updatedAt = now - index; changed = true; }
+        return next;
+      }).filter(Boolean);
+      if (changed) localStorage.setItem(GROUP_KEY, JSON.stringify(normalized));
+      return normalized;
     } catch (_) { return []; }
   }
 
+  function visibleGroups() {
+    return groups().filter(g => g && !g.deleted && g.id && g.url);
+  }
+
   function saveGroups(data) {
-    localStorage.setItem(GROUP_KEY, JSON.stringify(data));
+    localStorage.setItem(GROUP_KEY, JSON.stringify(Array.isArray(data) ? data : []));
+  }
+
+  function mergeGroupRecords(local, remote) {
+    const map = new Map();
+    for (const item of [...(Array.isArray(local) ? local : []), ...(Array.isArray(remote) ? remote : [])]) {
+      if (!item?.id) continue;
+      const old = map.get(String(item.id));
+      if (!old || Number(item.updatedAt || 0) >= Number(old.updatedAt || 0)) {
+        map.set(String(item.id), { ...item, id: String(item.id) });
+      }
+    }
+    return [...map.values()];
   }
 
 
@@ -203,9 +234,9 @@
     catch (_) { GM_setValue(GIST_ID_KEY, ''); gistId = ''; }
     if (gistId) return gistId;
     const created = await githubGistRequest('POST', 'https://api.github.com/gists', {
-      description: 'VADA Facebook review queue sync',
+      description: 'VADA Facebook group manager sync',
       public: false,
-      files: { [GIST_FILE]: { content: JSON.stringify({ version: 1, items: reviewRecords() }, null, 2) } }
+      files: { [GIST_FILE]: { content: JSON.stringify({ version: 2, items: reviewRecords(), groups: groups() }, null, 2) } }
     });
     gistId = String(created?.id || '');
     if (!gistId) throw new Error('Không tạo được Gist');
@@ -234,21 +265,41 @@
         throw err;
       }
       let remoteItems = [];
+      let remoteGroups = [];
       const raw = gist?.files?.[GIST_FILE]?.content || '';
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          remoteItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
+          if (Array.isArray(parsed)) remoteItems = parsed;
+          else {
+            remoteItems = Array.isArray(parsed?.items) ? parsed.items : [];
+            remoteGroups = Array.isArray(parsed?.groups) ? parsed.groups : [];
+          }
         } catch (_) {}
       }
-      const merged = mergeReviewRecords(reviewRecords(), remoteItems);
-      saveReviewRecords(merged);
+
+      const mergedItems = mergeReviewRecords(reviewRecords(), remoteItems);
+      const mergedGroups = mergeGroupRecords(groups(), remoteGroups);
+      saveReviewRecords(mergedItems);
+      saveGroups(mergedGroups);
+
       await githubGistRequest('PATCH', 'https://api.github.com/gists/' + encodeURIComponent(gistId), {
-        files: { [GIST_FILE]: { content: JSON.stringify({ version: 1, updatedAt: Date.now(), items: merged }, null, 2) } }
+        files: {
+          [GIST_FILE]: {
+            content: JSON.stringify({
+              version: 2,
+              updatedAt: Date.now(),
+              items: mergedItems,
+              groups: mergedGroups
+            }, null, 2)
+          }
+        }
       });
+
       renderReviewList();
-      setSyncStatus('☁ Đã đồng bộ • ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
-      if (showToast) toast('Đã đồng bộ danh sách để duyệt.');
+      renderGroups();
+      setSyncStatus('☁ Đã đồng bộ bài + group • ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+      if (showToast) toast('Đã đồng bộ bài để duyệt và danh sách group.');
     } catch (err) {
       console.error('[VADA FB] sync lỗi:', err);
       setSyncStatus('☁ Lỗi: ' + err.message);
@@ -418,7 +469,7 @@
   function renderGroups() {
     const box = $('#vada-fb-group-list');
     if (!box) return;
-    const data = groups();
+    const data = visibleGroups();
     if (!data.length) {
       box.innerHTML = '<div class="vada-fb-empty">Chưa lưu group nào.</div>';
       return;
@@ -435,11 +486,13 @@
     const g = currentGroup();
     if (!g) return toast('Hãy mở một group Facebook trước.');
     const data = groups();
-    const i = data.findIndex(x => x.id === g.id || x.url === g.url);
-    if (i >= 0) data[i] = { ...data[i], ...g };
-    else data.unshift(g);
+    const i = data.findIndex(x => String(x.id) === String(g.id));
+    const now = Date.now();
+    if (i >= 0) data[i] = { ...data[i], ...g, deleted: false, updatedAt: now };
+    else data.unshift({ ...g, deleted: false, updatedAt: now });
     saveGroups(data);
     renderGroups();
+    scheduleReviewSync();
     toast(i >= 0 ? 'Đã cập nhật group.' : 'Đã lưu group.');
   }
 
@@ -679,14 +732,24 @@
         const value = prompt('Nhập biệt danh cho group:', item.alias || item.name || '');
         if (value === null) return;
         item.alias = value.trim();
+        item.updatedAt = Date.now();
+        item.deleted = false;
         saveGroups(data);
         renderGroups();
+        scheduleReviewSync();
         return toast(item.alias ? 'Đã lưu biệt danh.' : 'Đã xóa biệt danh.');
       }
       const del = e.target.closest('.vada-fb-group-delete');
       if (del) {
-        saveGroups(groups().filter(g => g.url !== del.dataset.url));
-        return renderGroups();
+        const data = groups();
+        const item = data.find(g => g.url === del.dataset.url);
+        if (!item) return;
+        item.deleted = true;
+        item.updatedAt = Date.now();
+        saveGroups(data);
+        renderGroups();
+        scheduleReviewSync();
+        return toast('Đã xóa group và chờ đồng bộ.');
       }
       if (e.target.closest('#vada-fb-add-current')) return addCurrentGroup();
       if (e.target.closest('#vada-fb-rescan')) { resetCollapsed(); scanPosts(); applyImageHiding(true); return toast(`Đã quét lại • ẩn ${hiddenCount} ảnh/video.`); }
