@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.5.0
+// @version      1.5.1
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.5.0';
+  const VERSION = '1.5.1';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -79,6 +79,17 @@
 
   function saveGroups(data) {
     localStorage.setItem(GROUP_KEY, JSON.stringify(data));
+  }
+
+
+  function normalizeGistId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^(ghp_|github_pat_)/i.test(raw)) throw new Error('Bạn đang dán token vào ô Gist ID');
+    const m = raw.match(/gist\.github\.com\/(?:[^/]+\/)?([a-f0-9]{20,64})(?:[/?#]|$)/i);
+    if (m) return m[1];
+    if (/^[a-f0-9]{20,64}$/i.test(raw)) return raw;
+    throw new Error('Gist ID không hợp lệ. Hãy dán ID hoặc URL Gist đầy đủ.');
   }
 
   function reviewRecords() {
@@ -187,7 +198,9 @@
   }
 
   async function ensureGist() {
-    let gistId = String(GM_getValue(GIST_ID_KEY, '') || '').trim();
+    let gistId = '';
+    try { gistId = normalizeGistId(GM_getValue(GIST_ID_KEY, '') || ''); }
+    catch (_) { GM_setValue(GIST_ID_KEY, ''); gistId = ''; }
     if (gistId) return gistId;
     const created = await githubGistRequest('POST', 'https://api.github.com/gists', {
       description: 'VADA Facebook review queue sync',
@@ -209,7 +222,17 @@
     setSyncStatus('☁ Đang đồng bộ...');
     try {
       const gistId = await ensureGist();
-      const gist = await githubGistRequest('GET', 'https://api.github.com/gists/' + encodeURIComponent(gistId));
+      let gist;
+      try {
+        gist = await githubGistRequest('GET', 'https://api.github.com/gists/' + encodeURIComponent(gistId));
+      } catch (err) {
+        if (/GitHub HTTP 404/.test(String(err?.message || ''))) {
+          setSyncStatus('☁ Gist không tồn tại hoặc không có quyền truy cập');
+          if (showToast) alert('Gist ID sai, Gist đã bị xóa, hoặc token không có quyền truy cập Gist này.\n\nMáy đầu tiên: vào Cấu hình đồng bộ và để trống Gist ID để tạo Gist mới.\nMáy khác: dán đúng URL/ID của Gist đã tạo.');
+          return;
+        }
+        throw err;
+      }
       let remoteItems = [];
       const raw = gist?.files?.[GIST_FILE]?.content || '';
       if (raw) {
@@ -305,14 +328,25 @@
 
   async function configureReviewSync() {
     const oldId = String(GM_getValue(GIST_ID_KEY, '') || '');
-    const gistId = prompt('GitHub Gist ID dùng chung giữa các máy.\nĐể trống nếu muốn tạo Gist mới:', oldId);
-    if (gistId === null) return;
+    const gistInput = prompt('GitHub Gist dùng chung giữa các máy.\nCó thể dán Gist ID hoặc URL Gist đầy đủ.\nĐể trống nếu muốn tạo Gist mới:', oldId);
+    if (gistInput === null) return;
+
+    let gistId = '';
+    try { gistId = normalizeGistId(gistInput); }
+    catch (err) { alert(err.message); return; }
+
     const oldToken = String(GM_getValue(GIST_TOKEN_KEY, '') || '');
     const token = prompt('GitHub token có quyền Gist.\nToken chỉ lưu trong Tampermonkey trên máy này, không ghi vào userscript/GitHub repo:', oldToken ? '••••••••' : '');
     if (token === null) return;
-    if (gistId.trim()) GM_setValue(GIST_ID_KEY, gistId.trim());
-    else GM_setValue(GIST_ID_KEY, '');
-    if (token !== '••••••••' && token.trim()) GM_setValue(GIST_TOKEN_KEY, token.trim());
+
+    const cleanToken = token === '••••••••' ? oldToken : token.trim();
+    if (/^https?:\/\//i.test(cleanToken) || /^[a-f0-9]{20,64}$/i.test(cleanToken)) {
+      alert('Ô token không đúng định dạng. Hãy dán GitHub Personal Access Token.');
+      return;
+    }
+
+    GM_setValue(GIST_ID_KEY, gistId);
+    if (token !== '••••••••') GM_setValue(GIST_TOKEN_KEY, cleanToken);
     await syncReviews(true);
   }
 
