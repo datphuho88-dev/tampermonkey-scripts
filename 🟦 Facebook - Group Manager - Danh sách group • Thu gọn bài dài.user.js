@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.5.2
+// @version      1.5.3
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://www.facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.5.2';
+  const VERSION = '1.5.3';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -55,8 +55,29 @@
   const imageStyles = new Map();
   const videoStyles = new Map();
   const boxStyles = new Map();
-  const $ = (s, root = document) => root.querySelector(s);
-  const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+
+  const gmGet = (key, fallback) => {
+    try {
+      if (typeof GM_getValue === 'function') return gmGet(key, fallback);
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem('__VADA_GM__' + key);
+      return raw == null ? fallback : JSON.parse(raw);
+    } catch (_) { return fallback; }
+  };
+
+  const gmSet = (key, value) => {
+    try {
+      if (typeof GM_setValue === 'function') {
+        gmSet(key, value);
+        return;
+      }
+    } catch (_) {}
+    try { localStorage.setItem('__VADA_GM__' + key, JSON.stringify(value)); } catch (_) {}
+  };
+
+  const $ = (s, root = document) => root?.querySelector?.(s) || null;
+  const $ = (s, root = document) => root?.querySelectorAll ? [...root.querySelectorAll(s)] : [];
 
   try { window[INSTANCE_KEY]?.cleanup?.(); } catch (_) {}
 
@@ -125,13 +146,13 @@
 
   function reviewRecords() {
     try {
-      const data = GM_getValue(SAVED_KEY, []);
+      const data = gmGet(SAVED_KEY, []);
       return Array.isArray(data) ? data : [];
     } catch (_) { return []; }
   }
 
   function saveReviewRecords(data) {
-    try { GM_setValue(SAVED_KEY, Array.isArray(data) ? data : []); } catch (_) {}
+    try { gmSet(SAVED_KEY, Array.isArray(data) ? data : []); } catch (_) {}
   }
 
   function normalizePostUrl(url) {
@@ -198,7 +219,7 @@
 
   function githubGistRequest(method, url, body) {
     return new Promise((resolve, reject) => {
-      const token = String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim();
+      const token = String(gmGet(GIST_TOKEN_KEY, '') || '').trim();
       if (!token) return reject(new Error('Chưa cấu hình GitHub token'));
       GM_xmlhttpRequest({
         method,
@@ -230,8 +251,8 @@
 
   async function ensureGist() {
     let gistId = '';
-    try { gistId = normalizeGistId(GM_getValue(GIST_ID_KEY, '') || ''); }
-    catch (_) { GM_setValue(GIST_ID_KEY, ''); gistId = ''; }
+    try { gistId = normalizeGistId(gmGet(GIST_ID_KEY, '') || ''); }
+    catch (_) { gmSet(GIST_ID_KEY, ''); gistId = ''; }
     if (gistId) return gistId;
     const created = await githubGistRequest('POST', 'https://api.github.com/gists', {
       description: 'VADA Facebook group manager sync',
@@ -240,12 +261,12 @@
     });
     gistId = String(created?.id || '');
     if (!gistId) throw new Error('Không tạo được Gist');
-    GM_setValue(GIST_ID_KEY, gistId);
+    gmSet(GIST_ID_KEY, gistId);
     return gistId;
   }
 
   async function syncReviews(showToast = false) {
-    const token = String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim();
+    const token = String(gmGet(GIST_TOKEN_KEY, '') || '').trim();
     if (!token) {
       setSyncStatus('☁ Chưa cấu hình đồng bộ');
       return;
@@ -378,7 +399,7 @@
   }
 
   async function configureReviewSync() {
-    const oldId = String(GM_getValue(GIST_ID_KEY, '') || '');
+    const oldId = String(gmGet(GIST_ID_KEY, '') || '');
     const gistInput = prompt('GitHub Gist dùng chung giữa các máy.\nCó thể dán Gist ID hoặc URL Gist đầy đủ.\nĐể trống nếu muốn tạo Gist mới:', oldId);
     if (gistInput === null) return;
 
@@ -386,7 +407,7 @@
     try { gistId = normalizeGistId(gistInput); }
     catch (err) { alert(err.message); return; }
 
-    const oldToken = String(GM_getValue(GIST_TOKEN_KEY, '') || '');
+    const oldToken = String(gmGet(GIST_TOKEN_KEY, '') || '');
     const token = prompt('GitHub token có quyền Gist.\nToken chỉ lưu trong Tampermonkey trên máy này, không ghi vào userscript/GitHub repo:', oldToken ? '••••••••' : '');
     if (token === null) return;
 
@@ -396,8 +417,8 @@
       return;
     }
 
-    GM_setValue(GIST_ID_KEY, gistId);
-    if (token !== '••••••••') GM_setValue(GIST_TOKEN_KEY, cleanToken);
+    gmSet(GIST_ID_KEY, gistId);
+    if (token !== '••••••••') gmSet(GIST_TOKEN_KEY, cleanToken);
     await syncReviews(true);
   }
 
@@ -706,7 +727,7 @@
     renderGroups();
     renderReviewList();
     updateImageButton();
-    if (String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim()) syncReviews(false);
+    if (String(gmGet(GIST_TOKEN_KEY, '') || '').trim()) syncReviews(false);
 
     panel.addEventListener('click', e => {
       const tab = e.target.closest('.vada-fb-tab');
@@ -936,7 +957,7 @@
     imageTimer = setInterval(() => { if (hideImages && !dragging) applyImageHiding(true); }, 1200);
     setupQuickSaveCapture();
     syncTimer = setInterval(() => {
-      if (String(GM_getValue(GIST_TOKEN_KEY, '') || '').trim()) syncReviews(false);
+      if (String(gmGet(GIST_TOKEN_KEY, '') || '').trim()) syncReviews(false);
     }, 30000);
   }
 
@@ -966,11 +987,29 @@
     document.getElementById('vada-fb-toast')?.remove();
   }
 
-  window[INSTANCE_KEY] = { version: VERSION, cleanup };
+  function init() {
+    if (!document.body) {
+      setTimeout(init, 120);
+      return;
+    }
 
-  addStyles();
-  createPanel();
-  scanPosts();
-  applyImageHiding(true);
-  startObserver();
+    try {
+      addStyles();
+      createPanel();
+      scanPosts();
+      applyImageHiding(true);
+      startObserver();
+      window[INSTANCE_KEY] = { version: VERSION, cleanup, init };
+      console.info('[VADA FB] ready v' + VERSION);
+    } catch (err) {
+      console.error('[VADA FB] init lỗi:', err);
+      document.getElementById(PANEL_ID)?.remove();
+      setTimeout(() => {
+        try { init(); } catch (_) {}
+      }, 700);
+    }
+  }
+
+  window[INSTANCE_KEY] = { version: VERSION, cleanup, init };
+  init();
 })();
