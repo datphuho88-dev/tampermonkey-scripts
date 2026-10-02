@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         🟦 Facebook Group Manager V2 - Loader riêng
+// @name         🟦 Facebook Group Manager V2 - Độc lập
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts/v2
-// @version      2.0.0
-// @description  Loader riêng cho Facebook Group Manager, tránh trùng tên userscript cũ.
+// @version      2.0.1
+// @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://facebook.com/*
 // @match        https://*.facebook.com/*
@@ -19,36 +19,102 @@
 (() => {
   'use strict';
 
-  const SOURCE = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
+  const VERSION = '2.0.1';
+  const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20Group%20Manager%20V2%20-%20Loader%20ri%C3%AAng.user.js';
+  const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER_V2__';
+  const PANEL_ID = 'vada-fb-group-manager-v2';
+  const STYLE_ID = 'vada-fb-group-manager-v2-style';
+  const GROUP_KEY = 'vada_fb_group_manager_groups_v1';
+  const POS_KEY = 'vada_fb_group_manager_position_v1';
+  const IMAGE_KEY = 'vada_fb_hide_review_images_v1';
+  const SAVED_KEY = 'vada_fb_review_saved_posts_v1';
+  const GIST_ID_KEY = 'vada_fb_review_gist_id_v1';
+  const GIST_TOKEN_KEY = 'vada_fb_review_gist_token_v1';
+  const GIST_FILE = 'fb-review-posts.json';
+  const TARGET_ATTR = 'data-vada-fb-collapse-target';
+  const IMAGE_ATTR = 'data-vada-fb-image-hidden';
+  const VIDEO_ATTR = 'data-vada-fb-video-hidden';
+  const BOX_ATTR = 'data-vada-fb-media-box-hidden';
+  const MAX_LINES = 3;
+  const MIN_TEXT = 120;
 
-  function boot() {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: SOURCE + '?_=' + Date.now(),
-      headers: {
-        'Cache-Control': 'no-cache, no-store, max-age=0',
-        'Pragma': 'no-cache'
-      },
-      timeout: 15000,
-      onload(res) {
-        try {
-          if (res.status < 200 || res.status >= 300) throw new Error('HTTP ' + res.status);
-          let code = String(res.responseText || '');
-          if (!code.includes('// ==UserScript==')) throw new Error('Source không hợp lệ');
-          code = code.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\s*/, '');
-          new Function(code)();
-        } catch (err) {
-          console.error('[VADA FB V2] lỗi chạy source:', err);
-        }
-      },
-      onerror() {
-        console.error('[VADA FB V2] không tải được source GitHub');
-      },
-      ontimeout() {
-        console.error('[VADA FB V2] GitHub timeout');
+  let observer = null;
+  let scanTimer = 0;
+  let imageTimer = 0;
+  let toastTimer = 0;
+  let dragMove = null;
+  let dragUp = null;
+  let dragFrame = 0;
+  let dragging = false;
+  let hideImages = localStorage.getItem(IMAGE_KEY) !== '0';
+  let hiddenCount = 0;
+  let syncTimer = 0;
+  let lastArticle = null;
+  let quickSaveHandler = null;
+
+  const imageStyles = new Map();
+  const videoStyles = new Map();
+  const boxStyles = new Map();
+
+  const gmGet = (key, fallback) => {
+    try {
+      if (typeof GM_getValue === 'function') return GM_getValue(key, fallback);
+    } catch (_) {}
+    try {
+      const raw = localStorage.getItem('__VADA_GM__' + key);
+      return raw == null ? fallback : JSON.parse(raw);
+    } catch (_) { return fallback; }
+  };
+
+  const gmSet = (key, value) => {
+    try {
+      if (typeof GM_setValue === 'function') {
+        GM_setValue(key, value);
+        return;
       }
-    });
+    } catch (_) {}
+    try { localStorage.setItem('__VADA_GM__' + key, JSON.stringify(value)); } catch (_) {}
+  };
+
+  const $ = (s, root = document) => root?.querySelector?.(s) || null;
+  const $$ = (s, root = document) => root?.querySelectorAll ? [...root.querySelectorAll(s)] : [];
+
+  try { window[INSTANCE_KEY]?.cleanup?.(); } catch (_) {}
+
+  function toast(text) {
+    clearTimeout(toastTimer);
+    document.getElementById('vada-fb-toast')?.remove();
+    const el = document.createElement('div');
+    el.id = 'vada-fb-toast';
+    el.textContent = text;
+    document.body.appendChild(el);
+    toastTimer = setTimeout(() => el.remove(), 2200);
   }
 
-  boot();
-})();
+  function groups() {
+    try {
+      const data = JSON.parse(localStorage.getItem(GROUP_KEY) || '[]');
+      if (!Array.isArray(data)) return [];
+      let changed = false;
+      const now = Date.now();
+      const normalized = data.map((g, index) => {
+        if (!g || typeof g !== 'object') return g;
+        const next = { ...g };
+        if (!next.id) {
+          const m = String(next.url || '').match(/\/groups\/([^/?#]+)/i);
+          if (m) { next.id = m[1]; changed = true; }
+        }
+        if (typeof next.deleted !== 'boolean') { next.deleted = false; changed = true; }
+        if (!Number(next.updatedAt)) { next.updatedAt = now - index; changed = true; }
+        return next;
+      }).filter(Boolean);
+      if (changed) localStorage.setItem(GROUP_KEY, JSON.stringify(normalized));
+      return normalized;
+    } catch (_) { return []; }
+  }
+
+  function visibleGroups() {
+    return groups().filter(g => g && !g.deleted && g.id && g.url);
+  }
+
+  function saveGroups(data) {
