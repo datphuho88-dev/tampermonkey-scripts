@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.5.4
+// @version      1.5.5
 // @description  Quản lý danh sách group Facebook, thu gọn bài dài, ẩn ảnh/video duyệt bài, kéo panel và hot reload chống CSP.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.5.4';
+  const VERSION = '1.5.5';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -58,7 +58,7 @@
 
   const gmGet = (key, fallback) => {
     try {
-      if (typeof GM_getValue === 'function') return gmGet(key, fallback);
+      if (typeof GM_getValue === 'function') return GM_getValue(key, fallback);
     } catch (_) {}
     try {
       const raw = localStorage.getItem('__VADA_GM__' + key);
@@ -69,7 +69,7 @@
   const gmSet = (key, value) => {
     try {
       if (typeof GM_setValue === 'function') {
-        gmSet(key, value);
+        GM_setValue(key, value);
         return;
       }
     } catch (_) {}
