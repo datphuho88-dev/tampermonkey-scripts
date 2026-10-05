@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.0
+// @version      1.6.1
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.0';
+  const VERSION = '1.6.1';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -810,21 +810,72 @@
     return false;
   }
 
+  function isPendingPostsPage() {
+    return /\/groups\/[^/]+\/pending_posts\/?$/i.test(location.pathname);
+  }
+
+  function isReviewActionContainer(node) {
+    if (!(node instanceof HTMLElement)) return false;
+    const text = cleanText(node);
+    if (/\b(phê duyệt|từ chối|approve|decline)\b/i.test(text)) return true;
+    return node.querySelectorAll('button,[role="button"]').length >= 3 && text.length > 20;
+  }
+
   function findMediaBox(media) {
     const article = media.closest('[role="article"]');
     let node = media.parentElement;
     let best = null;
 
-    for (let depth = 0; depth < 5 && node && node !== article; depth++, node = node.parentElement) {
+    for (let depth = 0; depth < 12 && node && node !== article; depth++, node = node.parentElement) {
       if (node.closest('#' + PANEL_ID)) break;
+      if (isReviewActionContainer(node)) break;
+
       const text = cleanText(node);
       const controls = node.querySelectorAll('button,input,textarea,[role="button"]').length;
       const mediaCount = node.querySelectorAll('img,video').length;
-      if (text.length > 24 || controls > 2 || mediaCount > 20) break;
-      best = node;
+
+      if (text.length > 45 || controls > 2 || mediaCount > 30) break;
+      if (mediaCount >= 1) best = node;
     }
 
     return best;
+  }
+
+  function collapseMediaBox(box) {
+    if (!(box instanceof HTMLElement) || box.hasAttribute(BOX_ATTR)) return;
+    saveOriginalStyle(box);
+    box.setAttribute(BOX_ATTR, '1');
+
+    box.style.setProperty('display', 'none', 'important');
+    box.style.setProperty('visibility', 'hidden', 'important');
+    box.style.setProperty('height', '0px', 'important');
+    box.style.setProperty('min-height', '0px', 'important');
+    box.style.setProperty('max-height', '0px', 'important');
+    box.style.setProperty('width', '0px', 'important');
+    box.style.setProperty('min-width', '0px', 'important');
+    box.style.setProperty('max-width', '0px', 'important');
+    box.style.setProperty('margin', '0px', 'important');
+    box.style.setProperty('padding', '0px', 'important');
+    box.style.setProperty('padding-bottom', '0px', 'important');
+    box.style.setProperty('aspect-ratio', 'auto', 'important');
+    box.style.setProperty('overflow', 'hidden', 'important');
+  }
+
+  function collapseEmptyMediaParents(box, article) {
+    if (!isPendingPostsPage() || !(box instanceof HTMLElement)) return;
+
+    let node = box.parentElement;
+    for (let depth = 0; depth < 5 && node && node !== article; depth++, node = node.parentElement) {
+      if (node.closest('#' + PANEL_ID)) break;
+      if (isReviewActionContainer(node)) break;
+
+      const text = cleanText(node);
+      const controls = node.querySelectorAll('button,input,textarea,[role="button"]').length;
+      const mediaCount = node.querySelectorAll('img,video').length;
+
+      if (text.length > 24 || controls > 1 || mediaCount < 1) break;
+      collapseMediaBox(node);
+    }
   }
 
   function hideOneMedia(media) {
@@ -851,17 +902,10 @@
     media.style.setProperty('padding', '0px', 'important');
 
     const box = findMediaBox(media);
-    if (box && !box.hasAttribute(BOX_ATTR)) {
-      saveOriginalStyle(box);
-      box.setAttribute(BOX_ATTR, '1');
-      box.style.setProperty('display', 'none', 'important');
-      box.style.setProperty('visibility', 'hidden', 'important');
-      box.style.setProperty('height', '0px', 'important');
-      box.style.setProperty('min-height', '0px', 'important');
-      box.style.setProperty('max-height', '0px', 'important');
-      box.style.setProperty('margin', '0px', 'important');
-      box.style.setProperty('padding', '0px', 'important');
-      box.style.setProperty('overflow', 'hidden', 'important');
+    if (box) {
+      const article = media.closest('[role="article"]');
+      collapseMediaBox(box);
+      collapseEmptyMediaParents(box, article);
     }
 
     hiddenCount++;
@@ -1200,8 +1244,10 @@
       '#' + PANEL_ID + ' .vada-fb-empty,#' + PANEL_ID + ' .vada-fb-status,#' + PANEL_ID + ' .vada-fb-sync-status{padding:7px;border-radius:7px;background:#080808;color:#999;border:1px solid #222;font-size:10px}',
       '[' + TARGET_ATTR + '="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:' + MAX_LINES + '!important;overflow:hidden!important}',
       '[' + TARGET_ATTR + '="expanded"]{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important}',
-      '[' + IMAGE_ATTR + '="1"],[' + VIDEO_ATTR + '="1"],[' + BOX_ATTR + '="1"]{display:none!important;visibility:hidden!important}',
+      '[' + IMAGE_ATTR + '="1"],[' + VIDEO_ATTR + '="1"],[' + BOX_ATTR + '="1"]{display:none!important;visibility:hidden!important;height:0!important;min-height:0!important;max-height:0!important;margin:0!important;padding:0!important;overflow:hidden!important}',
       '.vada-fb-expand-wrap{margin:3px 0!important}',
+      'body:has([role="article"]) [role="article"]{scroll-margin-top:70px}',
+      'body:has([href*="/pending_posts"]) [' + BOX_ATTR + '="1"]{aspect-ratio:auto!important;padding-bottom:0!important}',
       '.vada-fb-expand-btn{border:0!important;background:transparent!important;padding:2px 0!important;color:#5b9cff!important;cursor:pointer!important;font:700 12px Arial,sans-serif!important}',
       '#vada-fb-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#000;color:#fff;border:1px solid #2a2a2a;border-radius:8px;padding:9px 12px;font:12px Arial,sans-serif}'
     ].join('\n');
