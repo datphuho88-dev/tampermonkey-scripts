@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.1
+// @version      1.6.2
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.1';
+  const VERSION = '1.6.2';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -67,6 +67,7 @@
 
   let hideMedia = localStorage.getItem(MEDIA_KEY) !== '0';
   let hiddenCount = 0;
+  let lastPathname = location.pathname;
   let groupCache = [];
   let reviewCache = [];
   let lastGroupHtml = '';
@@ -536,16 +537,22 @@
     if (!box) return;
 
     const rows = visibleGroups();
-    const html = rows.length ? rows.map((g, index) => (
-      '<div class="vada-fb-group-row">' +
-        '<button class="vada-fb-group-open" data-url="' + escapeHtml(g.url) + '" title="' + escapeHtml(g.name) + '">' +
-          '<span class="vada-fb-index">' + (index + 1) + '</span>' +
-          '<span class="vada-fb-name">' + escapeHtml(g.alias || g.name || g.url) + '</span>' +
-        '</button>' +
-        '<button class="vada-fb-group-alias" data-url="' + escapeHtml(g.url) + '" title="Đặt biệt danh">✎</button>' +
-        '<button class="vada-fb-group-delete" data-url="' + escapeHtml(g.url) + '" title="Xóa">×</button>' +
-      '</div>'
-    )).join('') : '<div class="vada-fb-empty">Chưa lưu group nào.</div>';
+    const html = rows.length ? rows.map((g, index) => {
+      const homeUrl = 'https://www.facebook.com/groups/' + encodeURIComponent(g.id);
+      const reviewUrl = homeUrl + '/pending_posts';
+      return (
+        '<div class="vada-fb-group-row">' +
+          '<div class="vada-fb-group-label" title="' + escapeHtml(g.name) + '">' +
+            '<span class="vada-fb-index">' + (index + 1) + '</span>' +
+            '<span class="vada-fb-name">' + escapeHtml(g.alias || g.name || g.url) + '</span>' +
+          '</div>' +
+          '<button class="vada-fb-group-home" data-url="' + escapeHtml(homeUrl) + '" title="Trang chủ nhóm">🏠</button>' +
+          '<button class="vada-fb-group-review" data-url="' + escapeHtml(reviewUrl) + '" title="Bài viết đang chờ">✓</button>' +
+          '<button class="vada-fb-group-alias" data-url="' + escapeHtml(g.url) + '" title="Đặt biệt danh">✎</button>' +
+          '<button class="vada-fb-group-delete" data-url="' + escapeHtml(g.url) + '" title="Xóa">×</button>' +
+        '</div>'
+      );
+    }).join('') : '<div class="vada-fb-empty">Chưa lưu group nào.</div>';
 
     if (html !== lastGroupHtml) {
       lastGroupHtml = html;
@@ -879,7 +886,7 @@
   }
 
   function hideOneMedia(media) {
-    if (!hideMedia || !isPostMedia(media)) return false;
+    if (!hideMedia || !isPendingPostsPage() || !isPostMedia(media)) return false;
 
     const attr = media instanceof HTMLVideoElement ? VIDEO_ATTR : IMAGE_ATTR;
     if (media.hasAttribute(attr)) return false;
@@ -913,7 +920,7 @@
   }
 
   function hideMediaIn(root) {
-    if (!hideMedia || !root) return;
+    if (!hideMedia || !isPendingPostsPage() || !root) return;
 
     let changed = false;
     if (root instanceof HTMLElement && root.matches(MEDIA_SELECTOR)) {
@@ -945,6 +952,17 @@
   function updateMediaButton() {
     const button = $('#vada-fb-hide-media');
     if (!button) return;
+
+    const pending = isPendingPostsPage();
+    button.disabled = !pending;
+    button.style.opacity = pending ? '1' : '.55';
+    button.style.cursor = pending ? 'pointer' : 'not-allowed';
+
+    if (!pending) {
+      button.textContent = '🎞 Chỉ ẩn ảnh/video ở Duyệt bài';
+      return;
+    }
+
     button.textContent = hideMedia ?
       '🎞 Hiện ảnh/video (' + hiddenCount + ' đã ẩn)' :
       '🎞 Ẩn toàn bộ ảnh + video';
@@ -954,14 +972,41 @@
     hideMedia = !!value;
     localStorage.setItem(MEDIA_KEY, hideMedia ? '1' : '0');
 
+    if (!isPendingPostsPage()) {
+      restoreMedia();
+      updateMediaButton();
+      toast('Ảnh/video chỉ được ẩn trong trang Duyệt bài.');
+      return;
+    }
+
     if (hideMedia) {
       hiddenCount = 0;
       hideMediaIn(document);
-      toast('Đã bật ẩn ảnh/video.');
+      toast('Đã bật ẩn ảnh/video trong Duyệt bài.');
     } else {
       restoreMedia();
       updateMediaButton();
       toast('Đã hiện lại ảnh/video.');
+    }
+  }
+
+  function handleRouteChange(force) {
+    const current = location.pathname;
+    if (!force && current === lastPathname) return;
+    lastPathname = current;
+
+    if (!isPendingPostsPage()) {
+      if (hiddenCount || document.querySelector('[' + IMAGE_ATTR + '],[' + VIDEO_ATTR + '],[' + BOX_ATTR + ']')) {
+        restoreMedia();
+      }
+      updateMediaButton();
+      return;
+    }
+
+    updateMediaButton();
+    if (hideMedia) {
+      hiddenCount = 0;
+      hideMediaIn(document);
     }
   }
 
@@ -1021,6 +1066,7 @@
     if (observer) observer.disconnect();
 
     observer = new MutationObserver(mutations => {
+      handleRouteChange(false);
       if (dragging) return;
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
@@ -1033,7 +1079,7 @@
 
     mediaLoadHandler = event => {
       const target = event.target;
-      if (!hideMedia) return;
+      if (!hideMedia || !isPendingPostsPage()) return;
       if (target instanceof HTMLImageElement || target instanceof HTMLVideoElement) {
         if (hideOneMedia(target)) updateMediaButton();
       }
@@ -1235,10 +1281,13 @@
       '#' + PANEL_ID + ' .vada-fb-load{margin-top:7px;background:#111;color:#fff;border:1px solid #333}',
       '#' + PANEL_ID + ' .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#bdbdbd}',
       '#' + PANEL_ID + ' .vada-fb-group-row,#' + PANEL_ID + ' .vada-fb-review-row{display:flex;gap:4px;margin-bottom:4px}',
-      '#' + PANEL_ID + ' .vada-fb-group-open,#' + PANEL_ID + ' .vada-fb-review-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #2a2a2a;background:#080808;border-radius:7px;padding:6px 7px;cursor:pointer;text-align:left;color:#f5f5f5}',
+      '#' + PANEL_ID + ' .vada-fb-group-label,#' + PANEL_ID + ' .vada-fb-review-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #2a2a2a;background:#080808;border-radius:7px;padding:6px 7px;text-align:left;color:#f5f5f5}',
+      '#' + PANEL_ID + ' .vada-fb-review-open{cursor:pointer}',
       '#' + PANEL_ID + ' .vada-fb-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700}',
       '#' + PANEL_ID + ' .vada-fb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}',
-      '#' + PANEL_ID + ' .vada-fb-group-alias,#' + PANEL_ID + ' .vada-fb-group-delete,#' + PANEL_ID + ' .vada-fb-review-delete{width:28px;border-radius:7px;cursor:pointer}',
+      '#' + PANEL_ID + ' .vada-fb-group-home,#' + PANEL_ID + ' .vada-fb-group-review,#' + PANEL_ID + ' .vada-fb-group-alias,#' + PANEL_ID + ' .vada-fb-group-delete,#' + PANEL_ID + ' .vada-fb-review-delete{width:28px;flex:0 0 28px;border-radius:7px;cursor:pointer;padding:0}',
+      '#' + PANEL_ID + ' .vada-fb-group-home{background:#101820;color:#dbeafe;border:1px solid #203044}',
+      '#' + PANEL_ID + ' .vada-fb-group-review{background:#0b1a0f;color:#86efac;border:1px solid #173820}',
       '#' + PANEL_ID + ' .vada-fb-group-alias{background:#111;color:#ddd;border:1px solid #2a2a2a}',
       '#' + PANEL_ID + ' .vada-fb-group-delete,#' + PANEL_ID + ' .vada-fb-review-delete{background:#160000;color:#ff6b6b;border:1px solid #3a1111;font-size:18px}',
       '#' + PANEL_ID + ' .vada-fb-empty,#' + PANEL_ID + ' .vada-fb-status,#' + PANEL_ID + ' .vada-fb-sync-status{padding:7px;border-radius:7px;background:#080808;color:#999;border:1px solid #222;font-size:10px}',
@@ -1299,7 +1348,7 @@
     enableDrag(panel);
     renderGroups();
     renderReviews();
-    updateMediaButton();
+    handleRouteChange(true);
 
     if (String(gmGet(GIST_TOKEN_KEY, '') || '').trim()) {
       setSyncStatus('☁ Sẵn sàng đồng bộ');
@@ -1328,9 +1377,15 @@
         return;
       }
 
-      const groupOpen = event.target.closest('.vada-fb-group-open');
-      if (groupOpen) {
-        location.href = groupOpen.getAttribute('data-url');
+      const groupHome = event.target.closest('.vada-fb-group-home');
+      if (groupHome) {
+        location.href = groupHome.getAttribute('data-url');
+        return;
+      }
+
+      const groupReview = event.target.closest('.vada-fb-group-review');
+      if (groupReview) {
+        location.href = groupReview.getAttribute('data-url');
         return;
       }
 
@@ -1476,7 +1531,7 @@
     createPanel();
 
     scanPosts(document);
-    if (hideMedia) hideMediaIn(document);
+    handleRouteChange(true);
 
     setupQuickSaveCapture();
     startObserver();
