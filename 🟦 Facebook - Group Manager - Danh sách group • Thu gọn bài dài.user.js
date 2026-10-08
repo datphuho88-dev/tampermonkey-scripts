@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.2
+// @version      1.6.3
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.2';
+  const VERSION = '1.6.3';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -72,6 +72,7 @@
   let reviewCache = [];
   let lastGroupHtml = '';
   let lastReviewHtml = '';
+  let draggingGroupId = '';
 
   const $ = (selector, root = document) => root && root.querySelector ? root.querySelector(selector) : null;
   const $$ = (selector, root = document) => root && root.querySelectorAll ? Array.from(root.querySelectorAll(selector)) : [];
@@ -145,6 +146,8 @@
     g.createdAt = Number(g.createdAt) || now() - index * 1000;
     g.name = String(g.name || ('Group ' + g.id));
     g.alias = String(g.alias || '');
+    g.icon = String(g.icon || '');
+    g.order = Number.isFinite(Number(g.order)) ? Number(g.order) : index;
     return g;
   }
 
@@ -170,7 +173,12 @@
     return groupCache
       .filter(g => g && !g.deleted && g.id)
       .slice()
-      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      .sort((a, b) => {
+        const ao = Number.isFinite(Number(a.order)) ? Number(a.order) : 999999;
+        const bo = Number.isFinite(Number(b.order)) ? Number(b.order) : 999999;
+        if (ao !== bo) return ao - bo;
+        return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+      });
   }
 
   function loadReviews() {
@@ -474,9 +482,37 @@
 
     if (!valid(bestName)) bestName = 'Group ' + id;
 
+    let icon = '';
+    const ogImage = $('meta[property="og:image"]');
+    if (ogImage && ogImage.content) icon = String(ogImage.content);
+
+    if (!icon) {
+      const imgs = $('img[src]');
+      let bestImage = null;
+      let bestImageScore = -1;
+      for (const img of imgs) {
+        if (!(img instanceof HTMLImageElement)) continue;
+        if (img.closest('#' + PANEL_ID)) continue;
+        const src = img.currentSrc || img.src || '';
+        if (!src || !/scontent|fbcdn/i.test(src)) continue;
+        const rect = img.getBoundingClientRect();
+        if (rect.width < 40 || rect.height < 40) continue;
+        let score = 0;
+        if (rect.top >= 0 && rect.top < 320) score += 500;
+        if (rect.left >= 0 && rect.left < 520) score += 250;
+        score += Math.min(rect.width * rect.height / 1000, 300);
+        if (score > bestImageScore) {
+          bestImageScore = score;
+          bestImage = src;
+        }
+      }
+      if (bestImage) icon = bestImage;
+    }
+
     return {
       id: String(id),
       name: bestName,
+      icon: icon,
       url: 'https://www.facebook.com/groups/' + id + '/pending_posts'
     };
   }
@@ -492,12 +528,16 @@
     const index = groupCache.findIndex(x => String(x.id) === g.id);
     if (index >= 0) {
       groupCache[index] = Object.assign({}, groupCache[index], g, {
+        icon: g.icon || groupCache[index].icon || '',
         deleted: false,
         updatedAt: time
       });
     } else {
-      groupCache.unshift(Object.assign({}, g, {
+      const maxOrder = visibleGroups().reduce((m, x) => Math.max(m, Number(x.order) || 0), -1);
+      groupCache.push(Object.assign({}, g, {
         alias: '',
+        icon: g.icon || '',
+        order: maxOrder + 1,
         deleted: false,
         createdAt: time,
         updatedAt: time
@@ -532,6 +572,35 @@
     toast('Đã xóa group.');
   }
 
+  function reorderGroup(sourceId, targetId, after) {
+    sourceId = String(sourceId || '');
+    targetId = String(targetId || '');
+    if (!sourceId || !targetId || sourceId === targetId) return;
+
+    const rows = visibleGroups();
+    const from = rows.findIndex(g => String(g.id) === sourceId);
+    let to = rows.findIndex(g => String(g.id) === targetId);
+    if (from < 0 || to < 0) return;
+
+    const moved = rows.splice(from, 1)[0];
+    if (from < to) to--;
+    if (after) to++;
+    to = Math.max(0, Math.min(to, rows.length));
+    rows.splice(to, 0, moved);
+
+    const time = now();
+    rows.forEach((g, index) => {
+      const real = groupCache.find(x => String(x.id) === String(g.id));
+      if (!real) return;
+      real.order = index;
+      real.updatedAt = time;
+    });
+
+    saveGroups();
+    queueSync(500);
+    toast('Đã lưu thứ tự group.');
+  }
+
   function renderGroups() {
     const box = $('#vada-fb-group-list');
     if (!box) return;
@@ -540,9 +609,15 @@
     const html = rows.length ? rows.map((g, index) => {
       const homeUrl = 'https://www.facebook.com/groups/' + encodeURIComponent(g.id);
       const reviewUrl = homeUrl + '/pending_posts';
+      const iconHtml = g.icon ?
+        '<img class="vada-fb-group-icon" src="' + escapeHtml(g.icon) + '" alt="">' :
+        '<span class="vada-fb-group-icon vada-fb-group-icon-placeholder">■</span>';
+
       return (
-        '<div class="vada-fb-group-row">' +
-          '<div class="vada-fb-group-label" title="' + escapeHtml(g.name) + '">' +
+        '<div class="vada-fb-group-row" draggable="true" data-group-id="' + escapeHtml(g.id) + '">' +
+          '<div class="vada-fb-group-label" title="Kéo để sắp xếp • ' + escapeHtml(g.name) + '">' +
+            '<span class="vada-fb-drag-handle" title="Kéo để sắp xếp">⋮⋮</span>' +
+            iconHtml +
             '<span class="vada-fb-index">' + (index + 1) + '</span>' +
             '<span class="vada-fb-name">' + escapeHtml(g.alias || g.name || g.url) + '</span>' +
           '</div>' +
@@ -1262,7 +1337,7 @@
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = [
-      '#' + PANEL_ID + '{position:fixed;top:88px;right:14px;z-index:2147483646;width:270px;max-height:calc(100vh - 34px);overflow:hidden;background:#000;color:#f5f5f5;border:1px solid #262626;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.72);font:12px/1.35 Arial,sans-serif;contain:layout style paint}',
+      '#' + PANEL_ID + '{position:fixed;top:88px;right:14px;z-index:2147483646;width:360px;max-height:calc(100vh - 34px);overflow:hidden;background:#000;color:#f5f5f5;border:1px solid #262626;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.72);font:12px/1.35 Arial,sans-serif;contain:layout style paint}',
       '#' + PANEL_ID + ' *{box-sizing:border-box}',
       '#' + PANEL_ID + ' button{font-family:inherit}',
       '#' + PANEL_ID + ' .vada-fb-header{height:34px;padding:0 7px 0 10px;display:flex;align-items:center;justify-content:space-between;background:#000;color:#fff;border-bottom:1px solid #222;font-weight:700;cursor:move;user-select:none;touch-action:none}',
@@ -1281,7 +1356,16 @@
       '#' + PANEL_ID + ' .vada-fb-load{margin-top:7px;background:#111;color:#fff;border:1px solid #333}',
       '#' + PANEL_ID + ' .vada-fb-section-title{margin:10px 2px 5px;font-size:11px;font-weight:700;color:#bdbdbd}',
       '#' + PANEL_ID + ' .vada-fb-group-row,#' + PANEL_ID + ' .vada-fb-review-row{display:flex;gap:4px;margin-bottom:4px}',
-      '#' + PANEL_ID + ' .vada-fb-group-label,#' + PANEL_ID + ' .vada-fb-review-open{min-width:0;flex:1;display:flex;align-items:center;gap:7px;border:1px solid #2a2a2a;background:#080808;border-radius:7px;padding:6px 7px;text-align:left;color:#f5f5f5}',
+      '#' + PANEL_ID + ' .vada-fb-group-row[draggable="true"]{transition:opacity .12s ease,transform .12s ease}',
+      '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-dragging{opacity:.45}',
+      '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-drop-before{box-shadow:inset 0 2px 0 #4ade80}',
+      '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-drop-after{box-shadow:inset 0 -2px 0 #4ade80}',
+      '#' + PANEL_ID + ' .vada-fb-group-label,#' + PANEL_ID + ' .vada-fb-review-open{min-width:0;flex:1;display:flex;align-items:center;gap:6px;border:1px solid #2a2a2a;background:#080808;border-radius:7px;padding:5px 6px;text-align:left;color:#f5f5f5}',
+      '#' + PANEL_ID + ' .vada-fb-group-label{cursor:grab;user-select:none}',
+      '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-dragging .vada-fb-group-label{cursor:grabbing}',
+      '#' + PANEL_ID + ' .vada-fb-drag-handle{color:#777;font-size:12px;letter-spacing:-2px;flex:0 0 13px}',
+      '#' + PANEL_ID + ' .vada-fb-group-icon{width:24px;height:24px;flex:0 0 24px;border-radius:5px;object-fit:cover;background:#141414;border:1px solid #2a2a2a}',
+      '#' + PANEL_ID + ' .vada-fb-group-icon-placeholder{display:flex;align-items:center;justify-content:center;color:#555;font-size:8px}',
       '#' + PANEL_ID + ' .vada-fb-review-open{cursor:pointer}',
       '#' + PANEL_ID + ' .vada-fb-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700}',
       '#' + PANEL_ID + ' .vada-fb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}',
@@ -1354,6 +1438,52 @@
       setSyncStatus('☁ Sẵn sàng đồng bộ');
       queueSync(250);
     }
+
+    const clearDropMarks = () => {
+      $('.vada-fb-group-row', panel).forEach(row => {
+        row.classList.remove('vada-fb-drop-before', 'vada-fb-drop-after');
+      });
+    };
+
+    panel.addEventListener('dragstart', event => {
+      const row = event.target.closest('.vada-fb-group-row[data-group-id]');
+      if (!row) return;
+      draggingGroupId = row.getAttribute('data-group-id') || '';
+      row.classList.add('vada-fb-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', draggingGroupId);
+      }
+    });
+
+    panel.addEventListener('dragover', event => {
+      const row = event.target.closest('.vada-fb-group-row[data-group-id]');
+      if (!row || !draggingGroupId || row.getAttribute('data-group-id') === draggingGroupId) return;
+      event.preventDefault();
+      clearDropMarks();
+      const rect = row.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      row.classList.add(after ? 'vada-fb-drop-after' : 'vada-fb-drop-before');
+      row.dataset.dropAfter = after ? '1' : '0';
+    });
+
+    panel.addEventListener('drop', event => {
+      const row = event.target.closest('.vada-fb-group-row[data-group-id]');
+      if (!row || !draggingGroupId) return;
+      event.preventDefault();
+      const targetId = row.getAttribute('data-group-id') || '';
+      const after = row.dataset.dropAfter === '1';
+      reorderGroup(draggingGroupId, targetId, after);
+      draggingGroupId = '';
+      clearDropMarks();
+    });
+
+    panel.addEventListener('dragend', event => {
+      const row = event.target.closest('.vada-fb-group-row[data-group-id]');
+      if (row) row.classList.remove('vada-fb-dragging');
+      draggingGroupId = '';
+      clearDropMarks();
+    });
 
     panel.addEventListener('click', event => {
       const tab = event.target.closest('.vada-fb-tab');
