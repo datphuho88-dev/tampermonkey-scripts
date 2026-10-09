@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.5
+// @version      1.6.6
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.5';
+  const VERSION = '1.6.6';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -463,33 +463,78 @@
     if (!name) name = 'Group ' + id;
 
     let icon = '';
+
+    // Ưu tiên ảnh bìa/header thực tế đang hiển thị của group.
     try {
-      const ogImage = $('meta[property="og:image"]');
-      if (ogImage && ogImage.content) icon = String(ogImage.content);
+      let bestSrc = '';
+      let bestScore = -1;
+
+      for (const img of $('img[src]')) {
+        if (!(img instanceof HTMLImageElement)) continue;
+        if (img.closest('#' + PANEL_ID)) continue;
+
+        const src = img.currentSrc || img.src || '';
+        if (!src || !/scontent|fbcdn/i.test(src)) continue;
+
+        const rect = img.getBoundingClientRect();
+        if (rect.width < 120 || rect.height < 60) continue;
+        if (rect.bottom < 0 || rect.top > 520) continue;
+
+        const area = rect.width * rect.height;
+        let score = Math.min(area / 1000, 1400);
+
+        // Ảnh bìa thường rộng, nằm gần đầu trang và có tỉ lệ ngang.
+        if (rect.top >= -80 && rect.top < 360) score += 1200;
+        if (rect.width >= 400) score += 900;
+        if (rect.width / Math.max(rect.height, 1) >= 1.5) score += 700;
+        if (rect.left >= 0 && rect.left < 700) score += 250;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestSrc = src;
+        }
+      }
+
+      if (bestSrc) icon = bestSrc;
     } catch (_) {}
 
+    // Facebook đôi khi dùng background-image cho ảnh bìa.
     if (!icon) {
       try {
-        const images = $('img[src]');
-        let best = '';
+        let bestSrc = '';
         let bestScore = -1;
-        for (const img of images) {
-          if (!(img instanceof HTMLImageElement)) continue;
-          if (img.closest('#' + PANEL_ID)) continue;
-          const src = img.currentSrc || img.src || '';
-          if (!src || !/scontent|fbcdn/i.test(src)) continue;
-          const rect = img.getBoundingClientRect();
-          if (rect.width < 40 || rect.height < 40) continue;
-          let score = 0;
-          if (rect.top >= 0 && rect.top < 320) score += 500;
-          if (rect.left >= 0 && rect.left < 520) score += 200;
-          score += Math.min((rect.width * rect.height) / 1000, 300);
+        for (const el of $('div,span')) {
+          if (!(el instanceof HTMLElement)) continue;
+          if (el.closest('#' + PANEL_ID)) continue;
+
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 250 || rect.height < 80) continue;
+          if (rect.bottom < 0 || rect.top > 520) continue;
+
+          const bg = getComputedStyle(el).backgroundImage || '';
+          const m = bg.match(/url\(["']?(https?:\/\/[^"')]+)["']?\)/i);
+          if (!m || !/scontent|fbcdn/i.test(m[1])) continue;
+
+          let score = Math.min((rect.width * rect.height) / 1000, 1400);
+          if (rect.top >= -80 && rect.top < 360) score += 1200;
+          if (rect.width >= 400) score += 900;
+          if (rect.width / Math.max(rect.height, 1) >= 1.5) score += 700;
+
           if (score > bestScore) {
             bestScore = score;
-            best = src;
+            bestSrc = m[1];
           }
         }
-        icon = best;
+        if (bestSrc) icon = bestSrc;
+      } catch (_) {}
+    }
+
+    // Fallback cuối cùng.
+    if (!icon) {
+      try {
+        const ogImage = $('meta[property="og:image"]');
+        const value = ogImage && ogImage.content ? String(ogImage.content) : '';
+        if (/^https?:\/\//i.test(value)) icon = value;
       } catch (_) {}
     }
 
@@ -600,7 +645,7 @@
       const homeUrl = 'https://www.facebook.com/groups/' + encodeURIComponent(g.id);
       const reviewUrl = homeUrl + '/pending_posts';
       const iconHtml = g.icon ?
-        '<img class="vada-fb-group-icon" src="' + escapeHtml(g.icon) + '" alt="">' :
+        '<img class="vada-fb-group-icon" data-group-icon-id="' + escapeHtml(g.id) + '" src="' + escapeHtml(g.icon) + '" alt="">' :
         '<span class="vada-fb-group-icon vada-fb-group-icon-placeholder">■</span>';
 
       return (
@@ -1354,8 +1399,8 @@
       '#' + PANEL_ID + ' .vada-fb-group-label{cursor:grab;user-select:none}',
       '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-dragging .vada-fb-group-label{cursor:grabbing}',
       '#' + PANEL_ID + ' .vada-fb-drag-handle{color:#777;font-size:12px;letter-spacing:-2px;flex:0 0 13px}',
-      '#' + PANEL_ID + ' .vada-fb-group-icon{width:24px;height:24px;flex:0 0 24px;border-radius:5px;object-fit:cover;background:#141414;border:1px solid #2a2a2a}',
-      '#' + PANEL_ID + ' .vada-fb-group-icon-placeholder{display:flex;align-items:center;justify-content:center;color:#555;font-size:8px}',
+      '#' + PANEL_ID + ' .vada-fb-group-icon{width:42px;height:42px;flex:0 0 42px;border-radius:7px;object-fit:cover;background:#141414;border:1px solid #2a2a2a}',
+      '#' + PANEL_ID + ' .vada-fb-group-icon-placeholder{display:flex;align-items:center;justify-content:center;color:#666;font-size:12px}',
       '#' + PANEL_ID + ' .vada-fb-review-open{cursor:pointer}',
       '#' + PANEL_ID + ' .vada-fb-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700}',
       '#' + PANEL_ID + ' .vada-fb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}',
@@ -1474,6 +1519,15 @@
       draggingGroupId = '';
       clearDropMarks();
     });
+
+    panel.addEventListener('error', event => {
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement) || !img.classList.contains('vada-fb-group-icon')) return;
+      const placeholder = document.createElement('span');
+      placeholder.className = 'vada-fb-group-icon vada-fb-group-icon-placeholder';
+      placeholder.textContent = '■';
+      img.replaceWith(placeholder);
+    }, true);
 
     panel.addEventListener('click', event => {
       const tab = event.target.closest('.vada-fb-tab');
