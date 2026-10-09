@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.4
+// @version      1.6.5
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.4';
+  const VERSION = '1.6.5';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -421,106 +421,96 @@
     const match = location.pathname.match(/^\/groups\/([^/?#]+)/i);
     if (!match) return null;
 
-    const id = match[1];
-    const rootPath = '/groups/' + id;
-    const ignored = new Set([
-      'đoạn chat', 'trang chủ của cộng đồng', 'tổng quan', 'hỗ trợ quản trị',
-      'yêu cầu hủy hiệu', 'bài viết đang chờ', 'có thể là spam', 'bài viết đã lên lịch',
-      'nhật ký hoạt động', 'quy tắc nhóm', 'nội dung bị thành viên báo cáo',
-      'thông báo kiểm duyệt', 'trạng thái nhóm', 'vai trò trong cộng đồng',
-      'cài đặt nhóm', 'thêm thành viên', 'mức độ tăng trưởng', 'lượt tương tác',
-      'quản trị viên và người kiểm duyệt', 'người tham gia'
-    ]);
+    const id = String(match[1]);
+    const homeUrl = 'https://www.facebook.com/groups/' + id;
+    const pendingUrl = homeUrl + '/pending_posts';
 
     const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
-    const valid = value => {
-      const text = clean(value);
-      return text.length >= 2 && text.length <= 140 &&
-        !ignored.has(text.toLowerCase()) && !/^facebook$/i.test(text);
-    };
+    const invalidNames = new Set([
+      'facebook','đoạn chat','bài viết đang chờ','tổng quan','trang chủ của cộng đồng',
+      'hỗ trợ quản trị','cài đặt nhóm','người tham gia','quản trị viên và người kiểm duyệt'
+    ]);
 
-    let bestName = '';
-    let bestScore = -1;
+    let name = '';
+    try {
+      const ogTitle = $('meta[property="og:title"]');
+      const candidate = clean(ogTitle && ogTitle.content);
+      if (candidate && !invalidNames.has(candidate.toLowerCase())) name = candidate;
+    } catch (_) {}
 
-    for (const a of $$('a[href]')) {
-      let u;
+    if (!name) {
       try {
-        u = new URL(a.href, location.origin);
-      } catch (_) {
-        continue;
-      }
-      if (u.origin !== location.origin) continue;
-      const p = u.pathname.replace(/\/+$/, '');
-      if (p !== rootPath && !p.startsWith(rootPath + '/')) continue;
-
-      const label = clean(a.innerText || a.getAttribute('aria-label'));
-      if (!valid(label)) continue;
-
-      const r = a.getBoundingClientRect();
-      let score = 0;
-      if (p === rootPath) score += 500;
-      if (r.top >= 0 && r.top < 150) score += 800;
-      if (r.left >= 0 && r.left < 430) score += 250;
-      if (a.closest('h1,h2,h3')) score += 500;
-      if (label.length >= 5 && label.length <= 90) score += 100;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestName = label;
-      }
+        const title = clean(document.title.replace(/\s*\|\s*Facebook\s*$/i, ''));
+        if (title && !invalidNames.has(title.toLowerCase())) name = title;
+      } catch (_) {}
     }
 
-    if (!valid(bestName)) {
-      const og = clean($('meta[property="og:title"]') && $('meta[property="og:title"]').content);
-      if (valid(og)) bestName = og;
+    if (!name) {
+      try {
+        for (const a of $('a[href]')) {
+          let u;
+          try { u = new URL(a.href, location.origin); } catch (_) { continue; }
+          if (u.pathname.replace(/\/+$/, '') !== '/groups/' + id) continue;
+          const label = clean(a.innerText || a.getAttribute('aria-label'));
+          if (label && label.length <= 140 && !invalidNames.has(label.toLowerCase())) {
+            name = label;
+            break;
+          }
+        }
+      } catch (_) {}
     }
 
-    if (!valid(bestName)) {
-      const title = clean(document.title.replace(/\s*\|\s*Facebook\s*$/i, ''));
-      if (valid(title)) bestName = title;
-    }
-
-    if (!valid(bestName)) bestName = 'Group ' + id;
+    if (!name) name = 'Group ' + id;
 
     let icon = '';
-    const ogImage = $('meta[property="og:image"]');
-    if (ogImage && ogImage.content) icon = String(ogImage.content);
+    try {
+      const ogImage = $('meta[property="og:image"]');
+      if (ogImage && ogImage.content) icon = String(ogImage.content);
+    } catch (_) {}
 
     if (!icon) {
-      const imgs = $('img[src]');
-      let bestImage = null;
-      let bestImageScore = -1;
-      for (const img of imgs) {
-        if (!(img instanceof HTMLImageElement)) continue;
-        if (img.closest('#' + PANEL_ID)) continue;
-        const src = img.currentSrc || img.src || '';
-        if (!src || !/scontent|fbcdn/i.test(src)) continue;
-        const rect = img.getBoundingClientRect();
-        if (rect.width < 40 || rect.height < 40) continue;
-        let score = 0;
-        if (rect.top >= 0 && rect.top < 320) score += 500;
-        if (rect.left >= 0 && rect.left < 520) score += 250;
-        score += Math.min(rect.width * rect.height / 1000, 300);
-        if (score > bestImageScore) {
-          bestImageScore = score;
-          bestImage = src;
+      try {
+        const images = $('img[src]');
+        let best = '';
+        let bestScore = -1;
+        for (const img of images) {
+          if (!(img instanceof HTMLImageElement)) continue;
+          if (img.closest('#' + PANEL_ID)) continue;
+          const src = img.currentSrc || img.src || '';
+          if (!src || !/scontent|fbcdn/i.test(src)) continue;
+          const rect = img.getBoundingClientRect();
+          if (rect.width < 40 || rect.height < 40) continue;
+          let score = 0;
+          if (rect.top >= 0 && rect.top < 320) score += 500;
+          if (rect.left >= 0 && rect.left < 520) score += 200;
+          score += Math.min((rect.width * rect.height) / 1000, 300);
+          if (score > bestScore) {
+            bestScore = score;
+            best = src;
+          }
         }
-      }
-      if (bestImage) icon = bestImage;
+        icon = best;
+      } catch (_) {}
     }
 
     return {
-      id: String(id),
-      name: bestName,
+      id: id,
+      name: name,
       icon: icon,
-      url: 'https://www.facebook.com/groups/' + id + '/pending_posts'
+      homeUrl: homeUrl,
+      url: pendingUrl
     };
   }
 
   function addCurrentGroup() {
-    const g = currentGroup();
-    if (!g) {
-      toast('Hãy mở một group Facebook trước.');
+    let g = null;
+    try {
+      g = currentGroup();
+    } catch (err) {
+      console.error('[VADA FB] currentGroup:', err);
+    }
+    if (!g || !g.id) {
+      toast('Không đọc được ID group từ URL hiện tại.');
       return;
     }
 
