@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.7
+// @version      1.6.8
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.7';
+  const VERSION = '1.6.8';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -417,6 +417,96 @@
     await syncData(true);
   }
 
+  function findVisibleGroupIconFromDom(groupId) {
+    const rootPath = '/groups/' + String(groupId);
+    const candidates = [];
+
+    const add = (url, score) => {
+      url = String(url || '').trim();
+      if (!url || !/^https?:\/\//i.test(url)) return;
+      if (!/scontent|fbcdn/i.test(url)) return;
+      candidates.push({ url, score: Number(score) || 0 });
+    };
+
+    try {
+      for (const a of $('a[href]')) {
+        let u;
+        try { u = new URL(a.href, location.origin); } catch (_) { continue; }
+        const p = u.pathname.replace(/\/+$/, '');
+        if (p !== rootPath && !p.startsWith(rootPath + '/')) continue;
+
+        const rect = a.getBoundingClientRect();
+        let baseScore = 0;
+        if (p === rootPath) baseScore += 900;
+        if (rect.top >= -20 && rect.top < 380) baseScore += 1000;
+        if (rect.left >= 0 && rect.left < 720) baseScore += 300;
+
+        for (const img of $('img[src]', a)) {
+          const r = img.getBoundingClientRect();
+          add(img.currentSrc || img.src, baseScore + Math.min(r.width * r.height / 20, 1200));
+        }
+
+        for (const image of $('svg image', a)) {
+          const href = image.getAttribute('href') ||
+                       image.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||
+                       image.getAttribute('xlink:href') || '';
+          const r = image.getBoundingClientRect();
+          add(href, baseScore + 700 + Math.min(r.width * r.height / 20, 1200));
+        }
+
+        try {
+          const bg = getComputedStyle(a).backgroundImage || '';
+          const m = bg.match(/url\(["']?(https?:\/\/[^"')]+)["']?\)/i);
+          if (m) add(m[1], baseScore + 600);
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    if (!candidates.length) {
+      try {
+        for (const image of $('svg image')) {
+          const r = image.getBoundingClientRect();
+          if (r.width < 32 || r.height < 32) continue;
+          if (r.bottom < 0 || r.top > 420) continue;
+          const href = image.getAttribute('href') ||
+                       image.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||
+                       image.getAttribute('xlink:href') || '';
+          let score = 300;
+          if (r.top < 260) score += 600;
+          if (r.left < 720) score += 250;
+          add(href, score + Math.min(r.width * r.height / 20, 1000));
+        }
+      } catch (_) {}
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0] ? candidates[0].url : '';
+  }
+
+  function refreshCurrentOpenGroupIcon() {
+    try {
+      const match = location.pathname.match(/^\/groups\/([^/?#]+)/i);
+      if (!match) return false;
+      const id = String(match[1]);
+      const item = groupCache.find(g => String(g.id) === id && !g.deleted);
+      if (!item) return false;
+
+      const icon = findVisibleGroupIconFromDom(id);
+      if (!icon || icon === item.icon) return false;
+
+      item.icon = icon;
+      item.iconBroken = false;
+      item.iconUpdatedAt = now();
+      item.updatedAt = now();
+      lastGroupHtml = '';
+      saveGroups();
+      queueSync(800);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function currentGroup() {
     const match = location.pathname.match(/^\/groups\/([^/?#]+)/i);
     if (!match) return null;
@@ -462,10 +552,10 @@
 
     if (!name) name = 'Group ' + id;
 
-    let icon = '';
+    let icon = findVisibleGroupIconFromDom(id);
 
     // Ưu tiên ảnh bìa/header thực tế đang hiển thị của group.
-    try {
+    if (!icon) try {
       let bestSrc = '';
       let bestScore = -1;
 
@@ -1282,6 +1372,7 @@
 
     observer = new MutationObserver(mutations => {
       handleRouteChange(false);
+      refreshCurrentOpenGroupIcon();
       if (dragging) return;
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
@@ -1504,7 +1595,7 @@
       '#' + PANEL_ID + ' .vada-fb-group-label{cursor:grab;user-select:none}',
       '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-dragging .vada-fb-group-label{cursor:grabbing}',
       '#' + PANEL_ID + ' .vada-fb-drag-handle{color:#777;font-size:12px;letter-spacing:-2px;flex:0 0 13px}',
-      '#' + PANEL_ID + ' .vada-fb-group-icon{width:42px;height:42px;flex:0 0 42px;border-radius:7px;object-fit:cover;background:#141414;border:1px solid #2a2a2a}',
+      '#' + PANEL_ID + ' .vada-fb-group-icon{width:48px;height:48px;flex:0 0 48px;border-radius:8px;object-fit:cover;background:#141414;border:1px solid #2a2a2a}',
       '#' + PANEL_ID + ' .vada-fb-group-icon-placeholder{display:flex;align-items:center;justify-content:center;color:#666;font-size:12px}',
       '#' + PANEL_ID + ' .vada-fb-review-open{cursor:pointer}',
       '#' + PANEL_ID + ' .vada-fb-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700}',
@@ -1819,7 +1910,10 @@
     loadReviews();
     addStyles();
     createPanel();
-    setTimeout(() => refreshMissingGroupIcons(), 900);
+    setTimeout(() => {
+      refreshCurrentOpenGroupIcon();
+      refreshMissingGroupIcons();
+    }, 900);
 
     scanPosts(document);
     handleRouteChange(true);
