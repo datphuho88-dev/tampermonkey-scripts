@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.6
+// @version      1.6.7
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.6';
+  const VERSION = '1.6.7';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -547,6 +547,110 @@
     };
   }
 
+  function extractGroupIconFromDocument(doc) {
+    if (!doc) return '';
+
+    try {
+      const og = doc.querySelector('meta[property="og:image"]');
+      const value = og && og.content ? String(og.content) : '';
+      if (/^https?:\/\//i.test(value)) return value;
+    } catch (_) {}
+
+    try {
+      const imageSrc = doc.querySelector('link[rel="image_src"]');
+      const value = imageSrc && imageSrc.href ? String(imageSrc.href) : '';
+      if (/^https?:\/\//i.test(value)) return value;
+    } catch (_) {}
+
+    try {
+      const images = Array.from(doc.querySelectorAll('img[src]'));
+      let best = '';
+      let bestScore = -1;
+      for (const img of images) {
+        const src = img.getAttribute('src') || '';
+        if (!/^https?:\/\//i.test(src) || !/scontent|fbcdn/i.test(src)) continue;
+        const width = Number(img.getAttribute('width')) || 0;
+        const height = Number(img.getAttribute('height')) || 0;
+        let score = width * height;
+        if (width >= 300) score += 500000;
+        if (width > height) score += 250000;
+        if (score > bestScore) {
+          bestScore = score;
+          best = src;
+        }
+      }
+      if (best) return best;
+    } catch (_) {}
+
+    return '';
+  }
+
+  async function fetchGroupIcon(groupId) {
+    const url = 'https://www.facebook.com/groups/' + encodeURIComponent(groupId) + '/?_=' + now();
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        redirect: 'follow'
+      });
+      if (!res.ok) return '';
+      const html = await res.text();
+      if (!html || html.length < 500) return '';
+
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      let icon = extractGroupIconFromDocument(doc);
+      if (icon) return icon;
+
+      const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+                html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+      if (!m) return '';
+
+      const ta = document.createElement('textarea');
+      ta.innerHTML = m[1];
+      return ta.value;
+    } catch (err) {
+      console.debug('[VADA FB] fetch icon lỗi:', groupId, err);
+      return '';
+    }
+  }
+
+  async function refreshGroupIcon(groupId, force = false) {
+    const item = groupCache.find(g => String(g.id) === String(groupId));
+    if (!item || item.deleted) return false;
+    if (!force && item.icon && !item.iconBroken) return true;
+
+    let icon = '';
+
+    try {
+      const match = location.pathname.match(/^\/groups\/([^/?#]+)/i);
+      if (match && String(match[1]) === String(groupId)) {
+        const current = currentGroup();
+        if (current && current.icon) icon = current.icon;
+      }
+    } catch (_) {}
+
+    if (!icon) icon = await fetchGroupIcon(groupId);
+    if (!icon) return false;
+
+    item.icon = icon;
+    item.iconBroken = false;
+    item.iconUpdatedAt = now();
+    item.updatedAt = now();
+    lastGroupHtml = '';
+    saveGroups();
+    queueSync(700);
+    return true;
+  }
+
+  async function refreshMissingGroupIcons() {
+    const targets = visibleGroups().filter(g => !g.icon || g.iconBroken).slice(0, 12);
+    for (const g of targets) {
+      await refreshGroupIcon(g.id, true);
+      await new Promise(resolve => setTimeout(resolve, 350));
+    }
+  }
+
   function addCurrentGroup() {
     let g = null;
     try {
@@ -581,6 +685,7 @@
 
     saveGroups();
     queueSync();
+    refreshGroupIcon(g.id, true);
     toast(index >= 0 ? 'Đã cập nhật group.' : 'Đã lưu group.');
   }
 
@@ -1523,6 +1628,17 @@
     panel.addEventListener('error', event => {
       const img = event.target;
       if (!(img instanceof HTMLImageElement) || !img.classList.contains('vada-fb-group-icon')) return;
+
+      const groupId = img.getAttribute('data-group-icon-id') || '';
+      const item = groupCache.find(g => String(g.id) === String(groupId));
+      if (item) {
+        item.iconBroken = true;
+        item.icon = '';
+        item.updatedAt = now();
+        saveGroups(false);
+        setTimeout(() => refreshGroupIcon(groupId, true), 50);
+      }
+
       const placeholder = document.createElement('span');
       placeholder.className = 'vada-fb-group-icon vada-fb-group-icon-placeholder';
       placeholder.textContent = '■';
@@ -1703,6 +1819,7 @@
     loadReviews();
     addStyles();
     createPanel();
+    setTimeout(() => refreshMissingGroupIcons(), 900);
 
     scanPosts(document);
     handleRouteChange(true);
