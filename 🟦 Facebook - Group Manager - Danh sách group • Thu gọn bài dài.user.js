@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.8
+// @version      1.6.9
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.8';
+  const VERSION = '1.6.9';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -429,7 +429,7 @@
     };
 
     try {
-      for (const a of $('a[href]')) {
+      for (const a of $$('a[href]')) {
         let u;
         try { u = new URL(a.href, location.origin); } catch (_) { continue; }
         const p = u.pathname.replace(/\/+$/, '');
@@ -441,12 +441,12 @@
         if (rect.top >= -20 && rect.top < 380) baseScore += 1000;
         if (rect.left >= 0 && rect.left < 720) baseScore += 300;
 
-        for (const img of $('img[src]', a)) {
+        for (const img of $$('img[src]', a)) {
           const r = img.getBoundingClientRect();
           add(img.currentSrc || img.src, baseScore + Math.min(r.width * r.height / 20, 1200));
         }
 
-        for (const image of $('svg image', a)) {
+        for (const image of $$('svg image', a)) {
           const href = image.getAttribute('href') ||
                        image.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||
                        image.getAttribute('xlink:href') || '';
@@ -464,7 +464,7 @@
 
     if (!candidates.length) {
       try {
-        for (const image of $('svg image')) {
+        for (const image of $$('svg image')) {
           const r = image.getBoundingClientRect();
           if (r.width < 32 || r.height < 32) continue;
           if (r.bottom < 0 || r.top > 420) continue;
@@ -475,6 +475,28 @@
           if (r.top < 260) score += 600;
           if (r.left < 720) score += 250;
           add(href, score + Math.min(r.width * r.height / 20, 1000));
+        }
+      } catch (_) {}
+    }
+
+    if (!candidates.length) {
+      try {
+        for (const img of $('img[src]')) {
+          if (!(img instanceof HTMLImageElement)) continue;
+          if (img.closest('#' + PANEL_ID)) continue;
+
+          const src = img.currentSrc || img.src || '';
+          if (!src || !/scontent|fbcdn/i.test(src)) continue;
+
+          const r = img.getBoundingClientRect();
+          if (r.width < 80 || r.height < 60) continue;
+          if (r.bottom < 0 || r.top > 520) continue;
+
+          let score = Math.min((r.width * r.height) / 10, 4000);
+          if (r.top < 320) score += 1500;
+          if (r.width >= 300) score += 1200;
+          if (r.width / Math.max(r.height, 1) >= 1.4) score += 700;
+          add(src, score);
         }
       } catch (_) {}
     }
@@ -537,7 +559,7 @@
 
     if (!name) {
       try {
-        for (const a of $('a[href]')) {
+        for (const a of $$('a[href]')) {
           let u;
           try { u = new URL(a.href, location.origin); } catch (_) { continue; }
           if (u.pathname.replace(/\/+$/, '') !== '/groups/' + id) continue;
@@ -559,7 +581,7 @@
       let bestSrc = '';
       let bestScore = -1;
 
-      for (const img of $('img[src]')) {
+      for (const img of $$('img[src]')) {
         if (!(img instanceof HTMLImageElement)) continue;
         if (img.closest('#' + PANEL_ID)) continue;
 
@@ -593,7 +615,7 @@
       try {
         let bestSrc = '';
         let bestScore = -1;
-        for (const el of $('div,span')) {
+        for (const el of $$('div,span')) {
           if (!(el instanceof HTMLElement)) continue;
           if (el.closest('#' + PANEL_ID)) continue;
 
@@ -1396,8 +1418,8 @@
   }
 
   function resetCollapsed() {
-    $$('.vada-fb-expand-wrap').forEach(el => el.remove());
-    $$('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
+    $$$('.vada-fb-expand-wrap').forEach(el => el.remove());
+    $$$('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
   }
 
   function loadPosition(panel) {
@@ -1671,7 +1693,7 @@
     }
 
     const clearDropMarks = () => {
-      $('.vada-fb-group-row', panel).forEach(row => {
+      $$('.vada-fb-group-row', panel).forEach(row => {
         row.classList.remove('vada-fb-drop-before', 'vada-fb-drop-after');
       });
     };
@@ -1739,8 +1761,8 @@
     panel.addEventListener('click', event => {
       const tab = event.target.closest('.vada-fb-tab');
       if (tab) {
-        $$('.vada-fb-tab', panel).forEach(el => el.classList.toggle('active', el === tab));
-        $$('.vada-fb-tab-pane', panel).forEach(el => {
+        $$$('.vada-fb-tab', panel).forEach(el => el.classList.toggle('active', el === tab));
+        $$$('.vada-fb-tab-pane', panel).forEach(el => {
           el.classList.toggle('active', el.getAttribute('data-pane') === tab.getAttribute('data-tab'));
         });
         return;
@@ -1910,10 +1932,12 @@
     loadReviews();
     addStyles();
     createPanel();
+    setTimeout(() => refreshCurrentOpenGroupIcon(), 500);
+    setTimeout(() => refreshCurrentOpenGroupIcon(), 1400);
     setTimeout(() => {
       refreshCurrentOpenGroupIcon();
       refreshMissingGroupIcons();
-    }, 900);
+    }, 2600);
 
     scanPosts(document);
     handleRouteChange(true);
