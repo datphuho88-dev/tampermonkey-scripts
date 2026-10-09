@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.9
+// @version      1.6.10
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.9';
+  const VERSION = '1.6.10';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -1418,8 +1418,8 @@
   }
 
   function resetCollapsed() {
-    $$$('.vada-fb-expand-wrap').forEach(el => el.remove());
-    $$$('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
+    $('.vada-fb-expand-wrap').forEach(el => el.remove());
+    $('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
   }
 
   function loadPosition(panel) {
@@ -1761,8 +1761,8 @@
     panel.addEventListener('click', event => {
       const tab = event.target.closest('.vada-fb-tab');
       if (tab) {
-        $$$('.vada-fb-tab', panel).forEach(el => el.classList.toggle('active', el === tab));
-        $$$('.vada-fb-tab-pane', panel).forEach(el => {
+        $('.vada-fb-tab', panel).forEach(el => el.classList.toggle('active', el === tab));
+        $('.vada-fb-tab-pane', panel).forEach(el => {
           el.classList.toggle('active', el.getAttribute('data-pane') === tab.getAttribute('data-tab'));
         });
         return;
