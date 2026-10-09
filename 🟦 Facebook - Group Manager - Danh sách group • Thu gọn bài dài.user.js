@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.11
+// @version      1.6.12
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.11';
+  const VERSION = '1.6.12';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -481,7 +481,7 @@
 
     if (!candidates.length) {
       try {
-        for (const img of $$('img[src]')) {
+        for (const img of $('img[src]')) {
           if (!(img instanceof HTMLImageElement)) continue;
           if (img.closest('#' + PANEL_ID)) continue;
 
@@ -862,8 +862,8 @@
       const homeUrl = 'https://www.facebook.com/groups/' + encodeURIComponent(g.id);
       const reviewUrl = homeUrl + '/pending_posts';
       const iconHtml = g.icon ?
-        '<button class="vada-fb-group-icon-btn" data-url="' + escapeHtml(homeUrl) + '" title="Mở trang chủ nhóm"><img class="vada-fb-group-icon" data-group-icon-id="' + escapeHtml(g.id) + '" src="' + escapeHtml(g.icon) + '" alt=""></button>' :
-        '<button class="vada-fb-group-icon-btn vada-fb-group-icon-placeholder" data-url="' + escapeHtml(homeUrl) + '" title="Mở trang chủ nhóm">■</button>';
+        '<button class="vada-fb-group-icon-home" draggable="false" data-url="' + escapeHtml(homeUrl) + '" title="Mở trang chủ nhóm"><img class="vada-fb-group-icon" draggable="false" data-group-icon-id="' + escapeHtml(g.id) + '" src="' + escapeHtml(g.icon) + '" alt=""></button>' :
+        '<button class="vada-fb-group-icon-home vada-fb-group-icon-placeholder" draggable="false" data-url="' + escapeHtml(homeUrl) + '" title="Mở trang chủ nhóm">■</button>';
 
       return (
         '<div class="vada-fb-group-row" draggable="true" data-group-id="' + escapeHtml(g.id) + '">' +
@@ -1417,8 +1417,8 @@
   }
 
   function resetCollapsed() {
-    $$('.vada-fb-expand-wrap').forEach(el => el.remove());
-    $$('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
+    $('.vada-fb-expand-wrap').forEach(el => el.remove());
+    $('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
   }
 
   function loadPosition(panel) {
@@ -1616,7 +1616,7 @@
       '#' + PANEL_ID + ' .vada-fb-group-label{cursor:grab;user-select:none}',
       '#' + PANEL_ID + ' .vada-fb-group-row.vada-fb-dragging .vada-fb-group-label{cursor:grabbing}',
       '#' + PANEL_ID + ' .vada-fb-drag-handle{color:#777;font-size:12px;letter-spacing:-2px;flex:0 0 13px}',
-      '#' + PANEL_ID + ' .vada-fb-group-icon-btn{width:48px;height:48px;flex:0 0 48px;border-radius:8px;padding:0;overflow:hidden;background:#141414;border:1px solid #2a2a2a;cursor:pointer;display:flex;align-items:center;justify-content:center}',
+      '#' + PANEL_ID + ' .vada-fb-group-icon-home{width:48px;height:48px;flex:0 0 48px;border-radius:8px;padding:0;overflow:hidden;background:#141414;border:1px solid #2a2a2a;cursor:pointer;display:flex;align-items:center;justify-content:center}',
       '#' + PANEL_ID + ' .vada-fb-group-icon{width:100%;height:100%;display:block;object-fit:cover;border:0}',
       '#' + PANEL_ID + ' .vada-fb-group-icon-placeholder{display:flex;align-items:center;justify-content:center;color:#666;font-size:12px}',
       '#' + PANEL_ID + ' .vada-fb-review-open{cursor:pointer}',
@@ -1691,21 +1691,8 @@
       queueSync(250);
     }
 
-    const switchPanelTab = tabName => {
-      $('.vada-fb-tab', panel).forEach(el => el.classList.toggle('active', el.getAttribute('data-tab') === tabName));
-      $('.vada-fb-tab-pane', panel).forEach(el => el.classList.toggle('active', el.getAttribute('data-pane') === tabName));
-    };
-
-    $('.vada-fb-tab', panel).forEach(tabButton => {
-      tabButton.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        switchPanelTab(tabButton.getAttribute('data-tab') || 'groups');
-      });
-    });
-
     const clearDropMarks = () => {
-      $$$('.vada-fb-group-row', panel).forEach(row => {
+      $$('.vada-fb-group-row', panel).forEach(row => {
         row.classList.remove('vada-fb-drop-before', 'vada-fb-drop-after');
       });
     };
@@ -1764,14 +1751,22 @@
         setTimeout(() => refreshGroupIcon(groupId, true), 50);
       }
 
-      const iconButton = img.closest('.vada-fb-group-icon-btn');
-      if (iconButton) {
-        iconButton.classList.add('vada-fb-group-icon-placeholder');
-        iconButton.textContent = '■';
-      }
+      const placeholder = document.createElement('span');
+      placeholder.className = 'vada-fb-group-icon vada-fb-group-icon-placeholder';
+      placeholder.textContent = '■';
+      img.replaceWith(placeholder);
     }, true);
 
     panel.addEventListener('click', event => {
+      const tab = event.target.closest('.vada-fb-tab');
+      if (tab) {
+        $$('.vada-fb-tab', panel).forEach(el => el.classList.toggle('active', el === tab));
+        $$('.vada-fb-tab-pane', panel).forEach(el => {
+          el.classList.toggle('active', el.getAttribute('data-pane') === tab.getAttribute('data-tab'));
+        });
+        return;
+      }
+
       const reviewOpen = event.target.closest('.vada-fb-review-open');
       if (reviewOpen) {
         window.open(reviewOpen.getAttribute('data-url'), '_blank', 'noopener');
@@ -1784,9 +1779,9 @@
         return;
       }
 
-      const groupIcon = event.target.closest('.vada-fb-group-icon-btn');
-      if (groupIcon) {
-        location.href = groupIcon.getAttribute('data-url');
+      const groupIconHome = event.target.closest('.vada-fb-group-icon-home');
+      if (groupIconHome) {
+        location.href = groupIconHome.getAttribute('data-url');
         return;
       }
 
