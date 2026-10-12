@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.14
+// @version      1.6.15
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -20,7 +20,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.14';
+  const VERSION = '1.6.15';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -929,6 +929,7 @@
       title: String(title || (old && old.title) || '').trim(),
       groupId: group ? group.id : (old && old.groupId) || '',
       groupName: group ? group.name : (old && old.groupName) || '',
+      note: String((old && old.note) || '').trim(),
       createdAt: old && old.createdAt ? old.createdAt : time,
       updatedAt: time,
       deleted: false
@@ -941,6 +942,21 @@
     queueSync();
     toast(index >= 0 ? 'Đã cập nhật bài trong ĐỂ DUYỆT.' : 'Đã lưu bài vào ĐỂ DUYỆT.');
     return true;
+  }
+
+  function editReviewNote(id) {
+    const item = reviewCache.find(x => String(x.id) === String(id));
+    if (!item || item.deleted) return;
+
+    const value = prompt('Ghi chú cho bài này:', String(item.note || ''));
+    if (value === null) return;
+
+    item.note = value.trim();
+    item.updatedAt = now();
+
+    saveReviews();
+    queueSync(500);
+    toast(item.note ? 'Đã lưu ghi chú.' : 'Đã xóa ghi chú.');
   }
 
   function deleteReview(id) {
@@ -962,16 +978,14 @@
     if (count) count.textContent = rows.length ? String(rows.length) : '';
 
     const html = rows.length ? rows.map((item, index) => {
-      let fallback = '';
-      try {
-        fallback = new URL(item.url).pathname.split('/').filter(Boolean).slice(-2).join('/');
-      } catch (_) {}
-      const label = item.title || item.groupName || fallback || ('Bài ' + (index + 1));
+      const note = String(item.note || '').trim();
+      const label = note || 'Chưa có ghi chú';
       return '<div class="vada-fb-review-row">' +
-        '<button class="vada-fb-review-open" data-url="' + escapeHtml(item.url) + '">' +
+        '<button class="vada-fb-review-open" data-url="' + escapeHtml(item.url) + '" title="Mở bài viết">' +
           '<span class="vada-fb-index">' + (index + 1) + '</span>' +
           '<span class="vada-fb-name">' + escapeHtml(label) + '</span>' +
         '</button>' +
+        '<button class="vada-fb-review-note" data-id="' + escapeHtml(item.id) + '" title="Ghi chú">✎</button>' +
         '<button class="vada-fb-review-delete" data-id="' + escapeHtml(item.id) + '" title="Xóa">×</button>' +
       '</div>';
     }).join('') : '<div class="vada-fb-empty">Chưa lưu bài nào.</div>';
@@ -1814,9 +1828,10 @@
       '#' + PANEL_ID + ' .vada-fb-review-open{cursor:pointer}',
       '#' + PANEL_ID + ' .vada-fb-index{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a1a1a;color:#fff;font-size:10px;font-weight:700}',
       '#' + PANEL_ID + ' .vada-fb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}',
-      '#' + PANEL_ID + ' .vada-fb-group-review,#' + PANEL_ID + ' .vada-fb-group-alias,#' + PANEL_ID + ' .vada-fb-group-delete,#' + PANEL_ID + ' .vada-fb-review-delete{width:28px;flex:0 0 28px;border-radius:7px;cursor:pointer;padding:0}',
+      '#' + PANEL_ID + ' .vada-fb-group-review,#' + PANEL_ID + ' .vada-fb-group-alias,#' + PANEL_ID + ' .vada-fb-group-delete,#' + PANEL_ID + ' .vada-fb-review-note,#' + PANEL_ID + ' .vada-fb-review-delete{width:28px;flex:0 0 28px;border-radius:7px;cursor:pointer;padding:0}',
       '#' + PANEL_ID + ' .vada-fb-group-review{background:#0b1a0f;color:#86efac;border:1px solid #173820}',
       '#' + PANEL_ID + ' .vada-fb-group-alias{background:#111;color:#ddd;border:1px solid #2a2a2a}',
+      '#' + PANEL_ID + ' .vada-fb-review-note{background:#111;color:#ddd;border:1px solid #2a2a2a}',
       '#' + PANEL_ID + ' .vada-fb-group-delete,#' + PANEL_ID + ' .vada-fb-review-delete{background:#160000;color:#ff6b6b;border:1px solid #3a1111;font-size:18px}',
       '#' + PANEL_ID + ' .vada-fb-empty,#' + PANEL_ID + ' .vada-fb-status,#' + PANEL_ID + ' .vada-fb-sync-status{padding:7px;border-radius:7px;background:#080808;color:#999;border:1px solid #222;font-size:10px}',
       '[' + TARGET_ATTR + '="collapsed"]{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:' + MAX_LINES + '!important;overflow:hidden!important}',
@@ -1962,6 +1977,12 @@
       const reviewOpen = event.target.closest('.vada-fb-review-open');
       if (reviewOpen) {
         window.open(reviewOpen.getAttribute('data-url'), '_blank', 'noopener');
+        return;
+      }
+
+      const reviewNote = event.target.closest('.vada-fb-review-note');
+      if (reviewNote) {
+        editReviewNote(reviewNote.getAttribute('data-id'));
         return;
       }
 
