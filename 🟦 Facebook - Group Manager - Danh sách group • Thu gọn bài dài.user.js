@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.13
+// @version      1.6.14
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -11,6 +11,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @connect      api.github.com
 // @run-at       document-idle
@@ -19,7 +20,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.13';
+  const VERSION = '1.6.14';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -67,6 +68,8 @@
   let lastArticle = null;
   let lastArticleUrl = '';
   let lastCopiedPostUrl = '';
+  let awaitingAdminCopyUntil = 0;
+  let clipboardPatches = [];
 
   let hideMedia = localStorage.getItem(MEDIA_KEY) !== '0';
   let hiddenCount = 0;
@@ -484,7 +487,7 @@
 
     if (!candidates.length) {
       try {
-        for (const img of $('img[src]')) {
+        for (const img of $$('img[src]')) {
           if (!(img instanceof HTMLImageElement)) continue;
           if (img.closest('#' + PANEL_ID)) continue;
 
@@ -1029,15 +1032,102 @@
       if (url && score > 0) candidates.push({ url, score });
     };
 
-    for (const a of $('a[href]', article)) add(a.href);
+    for (const a of $$('a[href]', article)) add(a.href);
 
-    for (const el of $('[data-href],[data-url]', article)) {
+    for (const el of $$('[data-href],[data-url]', article)) {
       add(el.getAttribute('data-href'));
       add(el.getAttribute('data-url'));
     }
 
     candidates.sort((a, b) => b.score - a.score);
     return candidates[0] ? candidates[0].url : '';
+  }
+
+  function captureFacebookClipboardText(value) {
+    const url = normalizeFacebookCandidate(value);
+    if (!url) return false;
+
+    lastCopiedPostUrl = url;
+
+    if (awaitingAdminCopyUntil && now() <= awaitingAdminCopyUntil) {
+      awaitingAdminCopyUntil = 0;
+      saveReviewPost(url, '');
+    }
+
+    return true;
+  }
+
+  function patchClipboardMethod(target, name, factory) {
+    if (!target) return false;
+
+    let original;
+    try { original = target[name]; } catch (_) { return false; }
+    if (typeof original !== 'function') return false;
+
+    const ownDescriptor = Object.getOwnPropertyDescriptor(target, name);
+
+    try {
+      Object.defineProperty(target, name, {
+        configurable: true,
+        writable: true,
+        value: factory(original)
+      });
+
+      clipboardPatches.push({ target, name, descriptor: ownDescriptor });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function installClipboardWriteInterceptor() {
+    try {
+      if (clipboardPatches.length) return true;
+
+      const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+      const clipboard = pageWindow.navigator && pageWindow.navigator.clipboard;
+      if (!clipboard) return false;
+
+      let patched = false;
+
+      patched = patchClipboardMethod(clipboard, 'writeText', original => function(text) {
+        try { captureFacebookClipboardText(String(text || '')); } catch (_) {}
+        return original.call(clipboard, text);
+      }) || patched;
+
+      patched = patchClipboardMethod(clipboard, 'write', original => function(items) {
+        try {
+          for (const item of Array.from(items || [])) {
+            if (!item || typeof item.getType !== 'function') continue;
+            const types = Array.from(item.types || []);
+            if (!types.includes('text/plain')) continue;
+
+            Promise.resolve(item.getType('text/plain'))
+              .then(blob => blob && typeof blob.text === 'function' ? blob.text() : '')
+              .then(text => captureFacebookClipboardText(text))
+              .catch(() => {});
+          }
+        } catch (_) {}
+
+        return original.call(clipboard, items);
+      }) || patched;
+
+      return patched;
+    } catch (err) {
+      console.debug('[VADA FB] clipboard interceptor:', err);
+      return false;
+    }
+  }
+
+  function restoreClipboardWriteInterceptor() {
+    for (let i = clipboardPatches.length - 1; i >= 0; i--) {
+      const patch = clipboardPatches[i];
+      try {
+        if (patch.descriptor) Object.defineProperty(patch.target, patch.name, patch.descriptor);
+        else delete patch.target[patch.name];
+      } catch (_) {}
+    }
+    clipboardPatches = [];
   }
 
   async function saveClipboardPost(manual = false) {
@@ -1073,6 +1163,8 @@
   }
 
   function setupQuickSaveCapture() {
+    installClipboardWriteInterceptor();
+
     quickSaveHandler = event => {
       const target = event.target;
       const article = target && target.closest ? target.closest('[role="article"]') : null;
@@ -1084,13 +1176,19 @@
       }
 
       const menuItem = target && target.closest ? target.closest('[role="menuitem"]') : null;
-      if (!menuItem) return;
+      if (!menuItem || event.type !== 'click') return;
 
       const label = String(menuItem.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
       if (!label.includes('sao chép liên kết để chia sẻ với quản trị viên')) return;
 
-      // The article URL was captured when the user opened the ... menu.
-      setTimeout(() => saveClipboardPost(false), 220);
+      installClipboardWriteInterceptor();
+      awaitingAdminCopyUntil = now() + 3500;
+
+      setTimeout(() => {
+        if (awaitingAdminCopyUntil && now() <= awaitingAdminCopyUntil) {
+          saveClipboardPost(false);
+        }
+      }, 650);
     };
 
     copyCaptureHandler = event => {
@@ -1098,8 +1196,7 @@
         const text = event.clipboardData && event.clipboardData.getData
           ? event.clipboardData.getData('text/plain')
           : '';
-        const url = normalizeFacebookCandidate(text);
-        if (url) lastCopiedPostUrl = url;
+        captureFacebookClipboardText(text);
       } catch (_) {}
     };
 
@@ -1512,8 +1609,8 @@
   }
 
   function resetCollapsed() {
-    $('.vada-fb-expand-wrap').forEach(el => el.remove());
-    $('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
+    $$('.vada-fb-expand-wrap').forEach(el => el.remove());
+    $$('[' + TARGET_ATTR + ']').forEach(el => el.removeAttribute(TARGET_ATTR));
   }
 
   function loadPosition(panel) {
@@ -1997,6 +2094,8 @@
       document.removeEventListener('click', quickSaveHandler, true);
     }
     if (copyCaptureHandler) document.removeEventListener('copy', copyCaptureHandler, false);
+    restoreClipboardWriteInterceptor();
+    awaitingAdminCopyUntil = 0;
     if (mediaLoadHandler) {
       document.removeEventListener('load', mediaLoadHandler, true);
       document.removeEventListener('loadedmetadata', mediaLoadHandler, true);
