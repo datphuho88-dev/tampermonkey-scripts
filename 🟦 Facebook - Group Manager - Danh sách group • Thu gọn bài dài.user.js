@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.15
+// @version      1.6.16
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -20,7 +20,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.15';
+  const VERSION = '1.6.16';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -913,7 +913,7 @@
     return (hash >>> 0).toString(36);
   }
 
-  function saveReviewPost(url, title) {
+  function saveReviewPost(url, title, note) {
     url = normalizePostUrl(url);
     if (!/^https?:\/\/(?:www\.)?facebook\.com\//i.test(url)) return false;
 
@@ -929,7 +929,7 @@
       title: String(title || (old && old.title) || '').trim(),
       groupId: group ? group.id : (old && old.groupId) || '',
       groupName: group ? group.name : (old && old.groupName) || '',
-      note: String((old && old.note) || '').trim(),
+      note: note !== undefined ? String(note || '').trim() : String((old && old.note) || '').trim(),
       createdAt: old && old.createdAt ? old.createdAt : time,
       updatedAt: time,
       deleted: false
@@ -942,6 +942,31 @@
     queueSync();
     toast(index >= 0 ? 'Đã cập nhật bài trong ĐỂ DUYỆT.' : 'Đã lưu bài vào ĐỂ DUYỆT.');
     return true;
+  }
+
+  function saveReviewFromInputs() {
+    const linkInput = $('#vada-fb-review-link');
+    const noteInput = $('#vada-fb-review-note-input');
+    if (!linkInput || !noteInput) return;
+
+    const rawLink = String(linkInput.value || '').trim();
+    const note = String(noteInput.value || '').trim();
+    const url = normalizeFacebookCandidate(rawLink);
+
+    if (!url) {
+      toast('Link Facebook không hợp lệ.');
+      linkInput.focus();
+      return;
+    }
+
+    if (!saveReviewPost(url, '', note)) {
+      toast('Không lưu được link này.');
+      return;
+    }
+
+    linkInput.value = '';
+    noteInput.value = '';
+    linkInput.focus();
   }
 
   function editReviewNote(id) {
@@ -1809,6 +1834,10 @@
       '#' + PANEL_ID + ' .vada-fb-tab-pane{display:none}',
       '#' + PANEL_ID + ' .vada-fb-tab-pane.active{display:block}',
       '#' + PANEL_ID + ' .vada-fb-primary,#' + PANEL_ID + ' .vada-fb-secondary,#' + PANEL_ID + ' .vada-fb-load{width:100%;border-radius:7px;padding:7px 8px;cursor:pointer;font-weight:700}',
+      '#' + PANEL_ID + ' .vada-fb-review-entry{display:grid;grid-template-columns:1.35fr 1fr;gap:5px;margin-bottom:6px}',
+      '#' + PANEL_ID + ' .vada-fb-review-entry input{min-width:0;width:100%;height:32px;border:1px solid #2a2a2a;border-radius:7px;background:#050505;color:#fff;padding:0 8px;outline:none;font:11px Arial,sans-serif}',
+      '#' + PANEL_ID + ' .vada-fb-review-entry input:focus{border-color:#666}',
+      '#' + PANEL_ID + ' .vada-fb-review-entry input::placeholder{color:#777}',
       '#' + PANEL_ID + ' .vada-fb-primary{background:#0a0a0a;color:#fff;border:1px solid #2a2a2a}',
       '#' + PANEL_ID + ' .vada-fb-secondary{margin-top:6px;background:#0a0a0a;color:#ddd;border:1px solid #2a2a2a}',
       '#' + PANEL_ID + ' .vada-fb-load{margin-top:7px;background:#111;color:#fff;border:1px solid #333}',
@@ -1876,7 +1905,11 @@
           '<button id="vada-fb-hide-media" class="vada-fb-secondary"></button>' +
         '</div>' +
         '<div class="vada-fb-tab-pane" data-pane="review">' +
-          '<button id="vada-fb-save-clipboard" class="vada-fb-primary">＋ Lưu link đang copy</button>' +
+          '<div class="vada-fb-review-entry">' +
+            '<input id="vada-fb-review-link" type="text" placeholder="Dán link bài Facebook">' +
+            '<input id="vada-fb-review-note-input" type="text" placeholder="Ghi chú">' +
+          '</div>' +
+          '<button id="vada-fb-save-review" class="vada-fb-primary">＋ Lưu</button>' +
           '<div class="vada-fb-section-title">🕒 BÀI ĐỂ DUYỆT SAU</div>' +
           '<div id="vada-fb-review-list"></div>' +
           '<div id="vada-fb-sync-status" class="vada-fb-sync-status">☁ Chưa cấu hình đồng bộ</div>' +
@@ -1897,6 +1930,16 @@
       setSyncStatus('☁ Sẵn sàng đồng bộ');
       queueSync(250);
     }
+
+    const reviewLinkInput = $('#vada-fb-review-link', panel);
+    const reviewNoteInput = $('#vada-fb-review-note-input', panel);
+    const reviewInputKeydown = event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      saveReviewFromInputs();
+    };
+    if (reviewLinkInput) reviewLinkInput.addEventListener('keydown', reviewInputKeydown);
+    if (reviewNoteInput) reviewNoteInput.addEventListener('keydown', reviewInputKeydown);
 
     const clearDropMarks = () => {
       $$('.vada-fb-group-row', panel).forEach(row => {
@@ -2021,8 +2064,8 @@
         return;
       }
 
-      if (event.target.closest('#vada-fb-save-clipboard')) {
-        saveClipboardPost(true);
+      if (event.target.closest('#vada-fb-save-review')) {
+        saveReviewFromInputs();
         return;
       }
 
