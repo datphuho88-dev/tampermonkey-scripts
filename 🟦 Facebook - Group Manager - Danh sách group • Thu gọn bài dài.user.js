@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🟦 Facebook - Group Manager - Danh sách group • Thu gọn bài dài
 // @namespace    https://github.com/datphuho88-dev/tampermonkey-scripts
-// @version      1.6.12
+// @version      1.6.13
 // @description  Facebook Group Manager tối ưu: group, bài để duyệt, thu gọn bài, ẩn media, đồng bộ Gist và hot reload.
 // @author       VADA
 // @match        https://facebook.com/*
@@ -19,7 +19,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.12';
+  const VERSION = '1.6.13';
   const RAW_URL = 'https://raw.githubusercontent.com/datphuho88-dev/tampermonkey-scripts/main/%F0%9F%9F%A6%20Facebook%20-%20Group%20Manager%20-%20Danh%20s%C3%A1ch%20group%20%E2%80%A2%20Thu%20g%E1%BB%8Dn%20b%C3%A0i%20d%C3%A0i.user.js';
   const INSTANCE_KEY = '__VADA_FB_GROUP_MANAGER__';
   const PANEL_ID = 'vada-fb-group-manager';
@@ -62,8 +62,11 @@
   let dragging = false;
 
   let quickSaveHandler = null;
+  let copyCaptureHandler = null;
   let mediaLoadHandler = null;
   let lastArticle = null;
+  let lastArticleUrl = '';
+  let lastCopiedPostUrl = '';
 
   let hideMedia = localStorage.getItem(MEDIA_KEY) !== '0';
   let hiddenCount = 0;
@@ -976,41 +979,133 @@
     }
   }
 
-  function findArticlePermalink(article) {
-    if (!(article instanceof HTMLElement)) return '';
-    const links = $$('a[href]', article).map(a => a.href).filter(Boolean);
-    return links.find(h => /\/groups\/[^/]+\/(?:posts|permalink)\/|story_fbid=|\/posts\/\d+/i.test(h)) || '';
+  function normalizeFacebookCandidate(value) {
+    value = String(value || '').trim();
+    if (!value) return '';
+
+    try {
+      const u = new URL(value, location.origin);
+
+      // Facebook redirect links sometimes wrap the real URL in ?u=
+      if (/\/l\.php$/i.test(u.pathname) && u.searchParams.get('u')) {
+        return normalizeFacebookCandidate(u.searchParams.get('u'));
+      }
+
+      if (!/(^|\.)facebook\.com$/i.test(u.hostname)) return '';
+
+      u.hash = '';
+      ['fbclid', '__cft__', '__tn__', 'mibextid', 'ref', 'refid'].forEach(k => u.searchParams.delete(k));
+      return u.href;
+    } catch (_) {
+      return '';
+    }
   }
 
-  async function saveClipboardPost() {
-    let url = '';
-    try {
-      if (navigator.clipboard && navigator.clipboard.readText) {
-        url = await navigator.clipboard.readText();
-      }
-    } catch (_) {}
+  function scorePostUrl(url) {
+    if (!url) return -1;
+    let score = 0;
 
-    if (!url) url = findArticlePermalink(lastArticle);
-    if (!saveReviewPost(url, '')) {
-      toast('Không đọc được link bài. Hãy bấm menu bài rồi thử lại.');
+    if (/\/groups\/[^/]+\/posts\/[^/?#]+/i.test(url)) score += 1000;
+    if (/\/groups\/[^/]+\/permalink\/[^/?#]+/i.test(url)) score += 950;
+    if (/story_fbid=/i.test(url)) score += 900;
+    if (/\/posts\/[^/?#]+/i.test(url)) score += 850;
+    if (/\/groups\/[^/]+\/pending_posts/i.test(url)) score += 500;
+    if (/[?&](?:post_id|pending_post_id|multi_permalinks)=/i.test(url)) score += 500;
+
+    if (/\/groups\/[^/?#]+\/?(?:\?|$)/i.test(url) && score < 500) score -= 200;
+    if (/\/profile\.php|\/people\//i.test(url)) score -= 500;
+
+    return score;
+  }
+
+  function findArticlePermalink(article) {
+    if (!(article instanceof HTMLElement)) return '';
+
+    const candidates = [];
+
+    const add = value => {
+      const url = normalizeFacebookCandidate(value);
+      const score = scorePostUrl(url);
+      if (url && score > 0) candidates.push({ url, score });
+    };
+
+    for (const a of $('a[href]', article)) add(a.href);
+
+    for (const el of $('[data-href],[data-url]', article)) {
+      add(el.getAttribute('data-href'));
+      add(el.getAttribute('data-url'));
     }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0] ? candidates[0].url : '';
+  }
+
+  async function saveClipboardPost(manual = false) {
+    let url = normalizeFacebookCandidate(lastCopiedPostUrl);
+
+    if (!url) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const clip = await navigator.clipboard.readText();
+          url = normalizeFacebookCandidate(clip);
+          if (url) lastCopiedPostUrl = url;
+        }
+      } catch (_) {}
+    }
+
+    if (!url) url = normalizeFacebookCandidate(lastArticleUrl);
+    if (!url) url = findArticlePermalink(lastArticle);
+
+    if (!url && manual) {
+      const pasted = prompt('Chrome không cho script đọc clipboard. Dán link bài Facebook vào đây:');
+      if (pasted !== null) url = normalizeFacebookCandidate(pasted);
+    }
+
+    if (!saveReviewPost(url, '')) {
+      toast(manual
+        ? 'Chưa lấy được link bài. Hãy copy link rồi bấm lại.'
+        : 'Chưa lấy được permalink của bài.');
+      return false;
+    }
+
+    lastCopiedPostUrl = url;
+    return true;
   }
 
   function setupQuickSaveCapture() {
     quickSaveHandler = event => {
-      const article = event.target && event.target.closest ? event.target.closest('[role="article"]') : null;
-      if (article) lastArticle = article;
+      const target = event.target;
+      const article = target && target.closest ? target.closest('[role="article"]') : null;
 
-      const menuItem = event.target && event.target.closest ? event.target.closest('[role="menuitem"]') : null;
+      if (article) {
+        lastArticle = article;
+        const found = findArticlePermalink(article);
+        if (found) lastArticleUrl = found;
+      }
+
+      const menuItem = target && target.closest ? target.closest('[role="menuitem"]') : null;
       if (!menuItem) return;
 
       const label = String(menuItem.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
       if (!label.includes('sao chép liên kết để chia sẻ với quản trị viên')) return;
 
-      setTimeout(saveClipboardPost, 180);
+      // The article URL was captured when the user opened the ... menu.
+      setTimeout(() => saveClipboardPost(false), 220);
     };
 
+    copyCaptureHandler = event => {
+      try {
+        const text = event.clipboardData && event.clipboardData.getData
+          ? event.clipboardData.getData('text/plain')
+          : '';
+        const url = normalizeFacebookCandidate(text);
+        if (url) lastCopiedPostUrl = url;
+      } catch (_) {}
+    };
+
+    document.addEventListener('pointerdown', quickSaveHandler, true);
     document.addEventListener('click', quickSaveHandler, true);
+    document.addEventListener('copy', copyCaptureHandler, false);
   }
 
   function cleanText(el) {
@@ -1809,7 +1904,7 @@
       }
 
       if (event.target.closest('#vada-fb-save-clipboard')) {
-        saveClipboardPost();
+        saveClipboardPost(true);
         return;
       }
 
@@ -1897,7 +1992,11 @@
     dragUp = null;
     dragging = false;
 
-    if (quickSaveHandler) document.removeEventListener('click', quickSaveHandler, true);
+    if (quickSaveHandler) {
+      document.removeEventListener('pointerdown', quickSaveHandler, true);
+      document.removeEventListener('click', quickSaveHandler, true);
+    }
+    if (copyCaptureHandler) document.removeEventListener('copy', copyCaptureHandler, false);
     if (mediaLoadHandler) {
       document.removeEventListener('load', mediaLoadHandler, true);
       document.removeEventListener('loadedmetadata', mediaLoadHandler, true);
@@ -1905,6 +2004,7 @@
     if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
 
     quickSaveHandler = null;
+    copyCaptureHandler = null;
     mediaLoadHandler = null;
     visibilityHandler = null;
 
